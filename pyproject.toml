@@ -1,0 +1,7 @@
+[project]
+name = "ecstasy"
+version = "0.1.0"
+description = "Benchmarking different foundational models in protein design"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

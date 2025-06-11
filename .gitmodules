@@ -1,0 +1,3 @@
+[submodule "modules/boltz"]
+	path = modules/boltz
+	url = git@github.com:softnanolab/boltz.git
