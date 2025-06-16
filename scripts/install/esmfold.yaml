@@ -1,0 +1,62 @@
+name: esmfold2          # identical to your pixi project name
+channels:                # keep the order – it matters
+  - pytorch
+  - nvidia
+  - conda-forge
+  - bioconda
+
+dependencies:
+  # ── core toolchain & CUDA ──────────────────────────────────────────
+  - python=3.10
+  - cuda=12.1               # metapackage (pulls CUDA Toolkit 12.1)
+  - pytorch=2.5.1           # matches your pixi lock
+  - pytorch-cuda=12.1       # ties PyTorch to CUDA 12.1
+  - gcc=11                  # C/C++ toolchain
+  - gxx=11
+  - libgcc-ng               # runtime libraries
+  - libxcrypt
+  - ninja
+  # ── scientific & ML stack ─────────────────────────────────────────
+  - numpy
+  - scipy
+  - pandas
+  - mkl                     # BLAS/LAPACK
+  - tqdm
+  - typing-extensions
+  - matplotlib
+  - einops
+  - omegaconf
+  - hydra-core
+  - pytorch-lightning
+  - wandb
+  # ── bio-informatics stack ─────────────────────────────────────────
+  - pdbfixer
+  - biopython
+  - modelcif
+  - hmmer
+  - hhsuite
+  - kalign2
+  - mmseqs2
+  - biotite
+  # ── utilities ─────────────────────────────────────────────────────
+  - awscli
+  - ml-collections
+  - aria2
+  - git
+  - requests
+  - packaging
+  - python-dotenv
+  - ipykernel>=6.29.5,<7
+  - jupyter>=1.1.1,<2
+  - pip                      # pip must be listed so the next section runs
+  # ── pip-only or git-based packages ────────────────────────────────
+  - pip:
+      - dm-tree
+      - gdown
+      - fire
+      - pytest
+      - fairscale
+      - rcsbsearchapi
+      # git sources (pin exact rev for deterministic build)
+      - "dllogger @ git+https://github.com/NVIDIA/dllogger.git"
+      - "fair-esm @ git+https://github.com/facebookresearch/esm.git@d7b3331f41442ed4ffde70cb95bdd48cabcec2e9"

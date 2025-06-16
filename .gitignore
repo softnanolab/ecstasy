@@ -1,3 +1,12 @@
+# Python
+__pycache__/
+*.egg-info
 .pytest_cache/
 .python-version
+
+# Custom
 envs/
+predictions/*
+resources/boltz/*
+resources/pdb_features.json
+test.ipynb

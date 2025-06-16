@@ -4,4 +4,31 @@ version = "0.1.0"
 description = "Benchmarking different foundational models in protein design"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "biopython>=1.85",
+    "biotite>=1.3.0",
+    "fire>=0.7.0",
+    "matplotlib>=3.10.3",
+    "memory-profiler>=0.61.0",
+    "numpy>=2.3.0",
+    "pandas>=2.3.0",
+    "psutil>=7.0.0",
+    "requests>=2.32.4",
+    "seaborn>=0.13.2",
+    "tmtools>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "jupyter>=1.1.1",
+    "ipykernel>=6.0.0",
+    "pandas>=1.0",
+    "seaborn>=0.11",
+    "biopython>=1.7",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

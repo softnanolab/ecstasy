@@ -1,3 +1,7 @@
 [submodule "modules/boltz"]
 	path = modules/boltz
 	url = git@github.com:softnanolab/boltz.git
+[submodule "modules/openfold"]
+	path = modules/openfold
+	url = https://github.com/softnanolab/openfold.git
+	branch = pl_upgrades
