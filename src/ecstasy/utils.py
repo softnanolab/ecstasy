@@ -4,6 +4,8 @@ import biotite.database.rcsb as rcsb
 import biotite.structure.io.pdbx as pdbx
 import os
 from pathlib import Path
+import numpy as np
+from biotite.sequence import ProteinSequence
 
 SRC_DIR = Path(__file__).parent.parent
 BASE_DIR = SRC_DIR.parent
@@ -51,6 +53,7 @@ def tm_score(ref_structure: structure.AtomArray, sub_structure: structure.AtomAr
     Args:
         ref_structure (AtomArray): The reference structure.
         sub_structure (AtomArray): The structure to superimpose onto the reference.
+    
     Returns:
         float: The TM-score between the two structures.
     """
@@ -59,3 +62,23 @@ def tm_score(ref_structure: structure.AtomArray, sub_structure: structure.AtomAr
     )
     return structure.tm_score(ref_structure, superimposed, ref_indices, sub_indices)
 
+
+def get_sequence(structure: structure.AtomArray) -> str:
+    """
+    Get the sequence of a structure.
+
+    Args:
+        structure (AtomArray): The structure to get the sequence from.
+
+    Returns:
+        dict: A dictionary of chain IDs and their corresponding sequences.
+    """
+    sequences = {}
+    for chain_id in np.unique(structure.chain_id):
+        chain_mask = (structure.chain_id == chain_id) & (structure.atom_name == "CA")
+        chain_structure = structure[chain_mask]
+        sequence = ""
+        for n in range(len(chain_structure)):
+            sequence += ProteinSequence.convert_letter_3to1(chain_structure[n].res_name)
+        sequences[str(chain_id)] = sequence
+    return sequences

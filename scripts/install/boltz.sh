@@ -11,3 +11,5 @@ conda create -p "$ENV_PATH" --no-default-packages -y
 
 # Install the package using conda run
 conda run -p "$ENV_PATH" pip install -e ./modules/boltz
+
+echo "To verify the installation, run: conda run -p "$ENV_PATH" boltz --help"
