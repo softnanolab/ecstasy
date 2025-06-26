@@ -22,7 +22,12 @@ This should install the dependencies in the `pyproject.toml` file. To install al
 uv sync --all-extras
 ```
 ### 2. Install Ecstacy Module 
-To install the Ecstacy module, run:
+To install the Ecstacy module, first activate the environment:
+```bash
+source .venv/bin/activate
+```
+
+Then run:
 ```bash
 uv pip install -e .
 ```
@@ -31,6 +36,16 @@ uv pip install -e .
 Clone the repository with submodules:
 ```bash
 git submodule update --init --recursive
+```
+
+#### 3.1. Installing ESMFold
+```bash
+bash scripts/install/esmfold.sh
+```
+
+#### 3.2. Installing Boltz
+```bash
+bash scripts/install/boltz.sh
 ```
 
 ## [DEV] Management of Repository

@@ -4,4 +4,7 @@
 [submodule "modules/openfold"]
 	path = modules/openfold
 	url = https://github.com/softnanolab/openfold.git
-	branch = pl_upgrades
+	branch = esmfold_compat
+[submodule "modules/esm"]
+	path = modules/esm
+	url = https://github.com/softnanolab/esm.git
