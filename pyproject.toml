@@ -16,6 +16,8 @@ dependencies = [
     "requests>=2.32.4",
     "seaborn>=0.13.2",
     "tmtools>=0.2.0",
+    "jupyter>=1.1.1",
+    "pytest>=8.4.1",
 ]
 
 [tool.setuptools]
@@ -23,9 +25,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[dependency-groups]
-dev = [
-    "jupyter>=1.1.1",
-    "pytest>=8.4.1",
-]

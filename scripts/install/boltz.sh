@@ -7,7 +7,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 ENV_PATH="./envs/boltz"
 
 # Create the environment if it doesn't exist
-conda create -p "$ENV_PATH" --no-default-packages -y
+conda create -p "$ENV_PATH" python=3.12 -y
 
 # Install the package using conda run
 conda run -p "$ENV_PATH" pip install -e ./modules/boltz
