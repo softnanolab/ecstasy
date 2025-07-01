@@ -60,4 +60,5 @@ dependencies:
       - biotite==0.39.0
       - matplotlib
       - joblib
+      - scikit-learn
       - git+https://github.com/NVIDIA/dllogger.git
