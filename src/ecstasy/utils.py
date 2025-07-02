@@ -8,6 +8,9 @@ import numpy as np
 from biotite.sequence import ProteinSequence
 from typing import List, Dict
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 SRC_DIR = Path(__file__).parent.parent
 BASE_DIR = SRC_DIR.parent
 
@@ -121,7 +124,7 @@ def combine_fastas_esmfold(input_dir: str, combined_name: str = "combined.fasta"
     """
     
     # Get all FASTA files in the directory
-    fasta_files = [f for f in os.listdir(input_dir) if f.endswith('.fasta')]
+    fasta_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.fasta')])
     
     if not fasta_files:
         print(f"No FASTA files found in {input_dir}")
@@ -142,7 +145,7 @@ def combine_fastas_esmfold(input_dir: str, combined_name: str = "combined.fasta"
         f.write('\n'.join(combined_content))
     
     print(f"Combined {len(fasta_files)} FASTA files into {output_path}")
-    
+
 def write_fasta_boltz(sequences: Dict[str, Dict[str, str]], output_dir: str, use_msas=None):
     """
     Write a dictionary of sequences to a FASTA file.
@@ -162,6 +165,69 @@ def write_fasta_boltz(sequences: Dict[str, Dict[str, str]], output_dir: str, use
             f">{_chain_id}|protein|empty\n{_seq}"
             for _chain_id, _seq in protein_sequences.items()
         ]
-        
+
         with open(os.path.join(output_dir, f"{protein_name}.fasta"), "w") as f:
-           f.write("\n".join(to_write))
+            f.write("\n".join(to_write))
+
+
+def generate_tm_confusion_matrix(
+    proteins, figsize=(10, 8), show_plot=True, return_matrix=False
+):
+    """
+    Generate a confusion matrix of TM scores for all pairs of proteins.
+
+    Args:
+        proteins (list): List of protein structures (biotite AtomArray objects)
+        figsize (tuple): Figure size for the plot (width, height)
+        show_plot (bool): Whether to display the plot
+        return_matrix (bool): Whether to return the TM score matrix
+
+    Returns:
+        numpy.ndarray: TM score matrix if return_matrix=True, otherwise None
+    """
+
+    n = len(proteins)
+
+    # Create a matrix to store TM scores
+    tm_matrix = np.zeros((n, n))
+    print(f"Running {n*n} pairs")
+
+    # Calculate TM scores for all pairs
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                tm_matrix[i, j] = 1.0  # Self-comparison
+            elif j < i:
+                # Already calculated for (j, i)
+                continue
+            else:
+                tm = tm_score(proteins[i], proteins[j])
+                tm_matrix[i, j] = tm
+                tm_matrix[j, i] = tm  # Symmetric matrix
+
+    if show_plot:
+        # Create the confusion matrix plot
+        plt.figure(figsize=figsize)
+        sns.heatmap(
+            tm_matrix,
+            annot=True,
+            fmt=".3f",
+            cmap="viridis",
+            cbar_kws={"label": "TM Score"},
+        )
+        plt.title("TM Score Confusion Matrix")
+        plt.xlabel("Structure 1")
+        plt.ylabel("Structure 2")
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        plt.show()
+
+        # Print summary statistics
+        print(f"Mean TM Score: {np.mean(tm_matrix):.4f}")
+        print(f"Std TM Score: {np.std(tm_matrix):.4f}")
+        print(f"Min TM Score: {np.min(tm_matrix):.4f}")
+        print(f"Max TM Score: {np.max(tm_matrix):.4f}")
+
+    if return_matrix:
+        return tm_matrix
