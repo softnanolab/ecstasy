@@ -173,7 +173,7 @@ def combine_fastas_esmfold(input_dir: str, combined_name: str = "combined.fasta"
 
 
 def write_fasta_boltz(
-    sequences: Dict[str, Dict[str, str]], output_dir: str, use_msas=None
+    sequences: Dict[str, Dict[str, str]], output_dir: str, use_msas: bool = False
 ):
     """
     Write a dictionary of sequences to a FASTA file.
@@ -181,16 +181,15 @@ def write_fasta_boltz(
     Args:
         sequences (Dict[str, Dict[str, str]]): A dictionary of protein names and their sequences.
         output_dir (str): The directory to write the FASTA file to.
-        use_msas (bool): Whether to use MSAs.
+        use_msas (bool): Whether to use MSAs. (default: False)
 
     Returns:
         None
     """
-    assert use_msas is None, "MSAs are not supported for Bolt at the moment"
     os.makedirs(output_dir, exist_ok=True)
     for protein_name, protein_sequences in sequences.items():
         to_write = [
-            f">{_chain_id}|protein|empty\n{_seq}"
+            f">{_chain_id}|protein{"|empty" if not use_msas else ""}\n{_seq}"
             for _chain_id, _seq in protein_sequences.items()
         ]
 
