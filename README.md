@@ -23,6 +23,11 @@ bash scripts/install/esmfold.sh
 bash scripts/install/boltz.sh
 ```
 
+#### 3.4. Installing ColabFold
+```bash
+bash scripts/install/colabfold.sh
+```
+
 ## [DEV] Management of Repository
 ### Maintaning dependencies
 To add a package to primary dependencies in UV pyproject.toml, run:
