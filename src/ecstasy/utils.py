@@ -1,20 +1,22 @@
+import os
+import shutil
 import biotite.structure as structure
 import biotite.structure.io as io
 import biotite.database.rcsb as rcsb
 import biotite.structure.io.pdbx as pdbx
-import os
 from pathlib import Path
 import numpy as np
 from biotite.sequence import ProteinSequence
-from typing import List, Dict
+from typing import Dict
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+from DockQ import DockQ
 
 SRC_DIR = Path(__file__).parent.parent
 BASE_DIR = SRC_DIR.parent
 
-
+# 1.Utils for playing around with structures / Sequences
 def load_structure(input_str: str, hetero: bool = False) -> structure.AtomArray | None:
     """
     Loads a protein structure from a PDB ID (fetching CIF) or a local CIF file path.
@@ -52,6 +54,27 @@ def load_structure(input_str: str, hetero: bool = False) -> structure.AtomArray 
         return None
 
 
+def get_sequence(structure: structure.AtomArray) -> str:
+    """
+    Get the sequence from a given Biotite AtomArray as returned by utils.load_structure().
+
+    Args:
+        structure (AtomArray): The structure to get the sequence from.
+
+    Returns:
+        dict: A dictionary of chain IDs and its corresponding sequences.
+    """
+    sequences = {}
+    for chain_id in np.unique(structure.chain_id):
+        chain_mask = (structure.chain_id == chain_id) & (structure.atom_name == "CA")
+        chain_structure = structure[chain_mask]
+        sequence = ""
+        for n in range(len(chain_structure)):
+            sequence += ProteinSequence.convert_letter_3to1(chain_structure[n].res_name)
+        sequences[str(chain_id)] = sequence
+    return sequences
+
+
 def filter_structure_by_chain_id(
     structure: structure.AtomArray, chain_id: str
 ) -> structure.AtomArray:
@@ -69,6 +92,33 @@ def filter_structure_by_chain_id(
     return filtered_structure
 
 
+def match_chains(structure_a: structure.AtomArray, structure_b: structure.AtomArray):
+    """
+    Match chains between two structures.
+
+    Args:
+        structure_a (AtomArray): The first structure.
+        structure_b (AtomArray): The second structure.
+
+    Returns:
+        dict: A dictionary of matched chains.
+    """
+
+    seq_a = get_sequence(structure_a)
+    seq_b = get_sequence(structure_b)
+
+    matched_chains = {}
+    for chain_id_a in seq_a.keys():
+        for chain_id_b in seq_b.keys():
+            if seq_a[chain_id_a] == seq_b[chain_id_b]:
+                matched_chains[chain_id_a] = chain_id_b
+                break
+        if chain_id_a not in matched_chains:
+            print(f"Chain {chain_id_a} not found in {structure_b}")
+    return matched_chains
+
+
+# 2.Utils for scoring structures: TM Score, DockQ Score
 def tm_score(
     ref_structure: structure.AtomArray, sub_structure: structure.AtomArray
 ) -> float:
@@ -83,118 +133,10 @@ def tm_score(
     """
     superimposed, _, ref_indices, sub_indices = (
         structure.superimpose_structural_homologs(
-            ref_structure, sub_structure, max_iterations=1
+            ref_structure, sub_structure, max_iterations=5
         )
     )
     return structure.tm_score(ref_structure, superimposed, ref_indices, sub_indices)
-
-
-def get_sequence(structure: structure.AtomArray) -> str:
-    """
-    Get the sequence of a structure.
-
-    Args:
-        structure (AtomArray): The structure to get the sequence from.
-
-    Returns:
-        dict: A dictionary of chain IDs and their corresponding sequences.
-    """
-    sequences = {}
-    for chain_id in np.unique(structure.chain_id):
-        chain_mask = (structure.chain_id == chain_id) & (structure.atom_name == "CA")
-        chain_structure = structure[chain_mask]
-        sequence = ""
-        for n in range(len(chain_structure)):
-            sequence += ProteinSequence.convert_letter_3to1(chain_structure[n].res_name)
-        sequences[str(chain_id)] = sequence
-    return sequences
-
-
-def write_fasta_esmfold(
-    sequences: Dict[str, Dict[str, str]],
-    output_dir: str,
-    file_name: str = "batch_esmfold.fasta",
-):
-    """
-    Write a dictionary of sequences to a FASTA file.
-
-    Args:
-        sequences (Dict[str, Dict[str, str]]): A dictionary of protein names and their sequences.
-        output_dir (str): The directory to write the FASTA file to.
-        file_name (str): The name of the FASTA file.
-
-    Returns:
-        None
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    to_write = []
-    for protein_name, protein_sequences in sequences.items():
-        comb_seq = ":".join(protein_sequences.values())
-        to_write.append(f">{protein_name}\n{comb_seq}")
-
-    with open(os.path.join(output_dir, file_name), "w") as f:
-        f.write("\n".join(to_write))
-
-
-def combine_fastas_esmfold(input_dir: str, combined_name: str = "combined.fasta"):
-    """
-    Combine all FASTA files in a directory into a single FASTA file.
-
-    Args:
-        input_dir (str): The directory containing FASTA files to combine.
-        combined_name (str): The name of the combined FASTA file.
-
-    Returns:
-        None
-    """
-
-    # Get all FASTA files in the directory
-    fasta_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".fasta")])
-
-    if not fasta_files:
-        print(f"No FASTA files found in {input_dir}")
-        return
-
-    # Read and combine all FASTA files
-    combined_content = []
-    for fasta_file in fasta_files:
-        file_path = os.path.join(input_dir, fasta_file)
-        with open(file_path, "r") as f:
-            content = f.read().strip()
-            if content:  # Only add non-empty content
-                combined_content.append(content)
-
-    # Write combined content to output file
-    output_path = os.path.join(input_dir, combined_name)
-    with open(output_path, "w") as f:
-        f.write("\n".join(combined_content))
-
-    print(f"Combined {len(fasta_files)} FASTA files into {output_path}")
-
-
-def write_fasta_boltz(
-    sequences: Dict[str, Dict[str, str]], output_dir: str, use_msas: bool = False
-):
-    """
-    Write a dictionary of sequences to a FASTA file.
-
-    Args:
-        sequences (Dict[str, Dict[str, str]]): A dictionary of protein names and their sequences.
-        output_dir (str): The directory to write the FASTA file to.
-        use_msas (bool): Whether to use MSAs. (default: False)
-
-    Returns:
-        None
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    for protein_name, protein_sequences in sequences.items():
-        to_write = [
-            f">{_chain_id}|protein{"|empty" if not use_msas else ""}\n{_seq}"
-            for _chain_id, _seq in protein_sequences.items()
-        ]
-
-        with open(os.path.join(output_dir, f"{protein_name}.fasta"), "w") as f:
-            f.write("\n".join(to_write))
 
 
 def generate_tm_confusion_matrix(
@@ -258,32 +200,6 @@ def generate_tm_confusion_matrix(
 
     if return_matrix:
         return tm_matrix
-
-
-def match_chains(structure_a: structure.AtomArray, structure_b: structure.AtomArray):
-    """
-    Match chains between two structures.
-
-    Args:
-        structure_a (AtomArray): The first structure.
-        structure_b (AtomArray): The second structure.
-
-    Returns:
-        dict: A dictionary of matched chains.
-    """
-
-    seq_a = get_sequence(structure_a)
-    seq_b = get_sequence(structure_b)
-
-    matched_chains = {}
-    for chain_id_a in seq_a.keys():
-        for chain_id_b in seq_b.keys():
-            if seq_a[chain_id_a] == seq_b[chain_id_b]:
-                matched_chains[chain_id_a] = chain_id_b
-                break
-        if chain_id_a not in matched_chains:
-            print(f"Chain {chain_id_a} not found in {structure_b}")
-    return matched_chains
 
 
 def compute_tm_scores_against_gd(out: dict):
@@ -491,3 +407,201 @@ def plot_tm_scores_for_proteins_against_gd(tm_scores_against_gd: dict):
 
     plt.tight_layout()
     plt.show()
+
+
+def dockq_score(protein_a_path: str, protein_b_path: str, chain_map: dict) -> float:
+    """
+    Calculate the DockQ score for a given protein pair.
+    """
+    protein_a = DockQ.load_PDB(protein_a_path)
+    protein_b = DockQ.load_PDB(protein_b_path)
+    dockq_scores = DockQ.run_on_all_native_interfaces(
+        model_structure=protein_a, native_structure=protein_b, chain_map=chain_map
+    )
+    # return the average dockq score for the multimer comparision
+    return np.mean([_item["DockQ"] for _item in list(dockq_scores[0].values())])
+
+
+# 3.Utils for writing files: FASTA, PDB, etc.
+def write_fasta_esmfold(
+    sequences: Dict[str, Dict[str, str]],
+    output_dir: str,
+    file_name: str = "batch_esmfold.fasta",
+):
+    """
+    Write a dictionary of sequences to a FASTA file.
+
+    Args:
+        sequences (Dict[str, Dict[str, str]]): A dictionary of protein names and their sequences.
+        output_dir (str): The directory to write the FASTA file to.
+        file_name (str): The name of the FASTA file.
+
+    Returns:
+        None
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    to_write = []
+    for protein_name, protein_sequences in sequences.items():
+        comb_seq = ":".join(protein_sequences.values())
+        to_write.append(f">{protein_name}\n{comb_seq}")
+
+    with open(os.path.join(output_dir, file_name), "w") as f:
+        f.write("\n".join(to_write))
+
+
+def combine_fastas_esmfold(input_dir: str, combined_name: str = "combined.fasta"):
+    """
+    Combine all FASTA files in a directory into a single FASTA file.
+
+    Args:
+        input_dir (str): The directory containing FASTA files to combine.
+        combined_name (str): The name of the combined FASTA file.
+
+    Returns:
+        None
+    """
+
+    # Get all FASTA files in the directory
+    fasta_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".fasta")])
+
+    if not fasta_files:
+        print(f"No FASTA files found in {input_dir}")
+        return
+
+    # Read and combine all FASTA files
+    combined_content = []
+    for fasta_file in fasta_files:
+        file_path = os.path.join(input_dir, fasta_file)
+        with open(file_path, "r") as f:
+            content = f.read().strip()
+            if content:  # Only add non-empty content
+                combined_content.append(content)
+
+    # Write combined content to output file
+    output_path = os.path.join(input_dir, combined_name)
+    with open(output_path, "w") as f:
+        f.write("\n".join(combined_content))
+
+    print(f"Combined {len(fasta_files)} FASTA files into {output_path}")
+
+
+def write_fasta_boltz(
+    sequences: Dict[str, Dict[str, str]], output_dir: str, use_msas: bool = False
+):
+    """
+    Write a dictionary of sequences to a FASTA file.
+
+    Args:
+        sequences (Dict[str, Dict[str, str]]): A dictionary of protein names and their sequences.
+        output_dir (str): The directory to write the FASTA file to.
+        use_msas (bool): Whether to use MSAs. (default: False)
+
+    Returns:
+        None
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    for protein_name, protein_sequences in sequences.items():
+        to_write = [
+            f">{_chain_id}|protein{"|empty" if not use_msas else ""}\n{_seq}"
+            for _chain_id, _seq in protein_sequences.items()
+        ]
+
+        with open(os.path.join(output_dir, f"{protein_name}.fasta"), "w") as f:
+            f.write("\n".join(to_write))
+
+
+def get_confidence_file_path_boltz(cif_file_path: str) -> str:
+    """
+    Get the confidence file path for a given CIF file path.
+    """
+    dir_path = os.path.dirname(cif_file_path)
+    model_file = os.path.basename(cif_file_path)
+    confidence_file = "confidence_" + model_file.replace(".cif", ".json")
+    return os.path.join(dir_path, confidence_file)
+
+
+def clean_up_colabfold_predictions(predictions_dir: str):
+    """Organise ColabFold output files by prediction.
+
+    ColabFold multimer runs often dump many files with long names into a single
+    directory.  For permutation‐invariance experiments we follow the naming
+    scheme
+
+        n{chains}_{protein_id}_p{perm}<whatever>.<ext>
+
+    for example::
+
+        n4_4YTP_p12_unrelaxed_rank_001_model_1.pdb
+        n4_4YTP_p12_unrelaxed_rank_001_model_1_scores.json
+
+    All files (or directories) that share the *prediction key* – the part of the
+    name that matches the regular expression ``n\d+_[A-Za-z0-9]+_p\d+`` – belong
+    to the same prediction.  This helper collects every such item and moves it
+    into a dedicated sub-folder with that key as its name, giving a much
+    cleaner directory structure::
+
+        predictions_dir/
+        ├── n4_4YTP_p12/
+        │   ├── n4_4YTP_p12_unrelaxed_rank_001_model_1.pdb
+        │   ├── n4_4YTP_p12_unrelaxed_rank_001_model_1_scores.json
+        │   └── …
+        ├── n4_4YTP_p34/
+        │   └── …
+        └── …
+
+    Parameters
+    ----------
+    predictions_dir : str
+        Path to the directory produced by ColabFold (e.g.
+        ``/path/to/outputs/colabfold``).
+    """
+
+    predictions_path = Path(predictions_dir).expanduser()
+    if not predictions_path.is_dir():
+        raise FileNotFoundError(f"{predictions_path} is not a valid directory")
+
+    # ColabFold writes a small <prefix>.done.txt file per prediction – we use its
+    # *stem* (filename without the ``.done.txt`` suffix) as the prediction key.
+    done_files = list(predictions_path.glob("*.done.txt"))
+    if not done_files:
+        print(f"No *.done.txt files found in {predictions_path}; nothing to organise.")
+        return
+
+    # Create a list of prediction keys, processed longest-first to avoid
+    # scenarios like key "..._p1" matching files that actually belong to
+    # "..._p10".
+    keys = sorted({f.stem for f in done_files}, key=len, reverse=True)
+
+    # Pre-create destination directories
+    for key in keys:
+        (predictions_path / key).mkdir(exist_ok=True)
+
+    moved_items = 0
+    for item in predictions_path.iterdir():
+        # Skip hidden files and the *.done.txt marker files themselves
+        if item.name.startswith(".") or item.suffixes[-2:] == [".done", ".txt"]:
+            continue
+
+        # Skip items that are already organised (their parent name equals a key)
+        if item.parent != predictions_path and item.parent.name in keys:
+            continue
+
+        for key in keys:
+            if item.name.startswith(key):
+                # Ensure the key match is exact and not a prefix of a longer key
+                remainder_idx = len(key)
+                if len(item.name) == remainder_idx or item.name[remainder_idx] in {
+                    "_",
+                    ".",
+                }:
+                    dest_dir = predictions_path / key
+                    try:
+                        shutil.move(str(item), dest_dir)
+                        moved_items += 1
+                    except shutil.Error as e:
+                        print(f"[WARNING] Could not move {item}: {e}")
+                    break  # Done with this item
+
+    print(
+        f"Moved {moved_items} items into organised sub-folders inside {predictions_path}."
+    )
