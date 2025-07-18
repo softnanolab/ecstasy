@@ -4,6 +4,13 @@ __pycache__/
 .pytest_cache/
 .python-version
 
+# VSCode / Cursor
+.vscode/
+.cursorrules
+.cursor/
+.cursor/
+*.code-workspace
+
 # Custom
 envs/
 predictions/*
