@@ -1,9 +1,22 @@
-import fire
+# Standardized imports
 import os
 import subprocess
 
+import fire
+
 
 def _validate_args(model: str, input_path: str, output_dir: str):
+    """Validates input arguments for prediction.
+
+    Args:
+        model (str): Model name.
+        input_path (str): Path to input fasta file or directory.
+        output_dir (str): Output directory.
+
+    Raises:
+        FileNotFoundError: If input path does not exist.
+        ValueError: If input file/dir is not valid or model is unsupported.
+    """
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input path {input_path} does not exist.")
     if os.path.isfile(input_path):
@@ -27,13 +40,12 @@ def _validate_args(model: str, input_path: str, output_dir: str):
 
 
 def predict(model: str, input_path: str, output_dir: str):
-    """
-    Predict the structure of a protein using the specified model.
+    """Predicts the structure of a protein using the specified model.
 
     Args:
-        model (str): The model to use for prediction. Currently only 'boltz' is supported.
-        input_path (str): The path to the input fasta file or directory.
-        output_dir (str): The directory to write the output files.
+        model (str): Model to use for prediction. Only 'boltz' is supported.
+        input_path (str): Path to input fasta file or directory.
+        output_dir (str): Directory to write output files.
     """
     _validate_args(model, input_path, output_dir)
     if model == "boltz":

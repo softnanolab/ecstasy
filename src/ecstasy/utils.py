@@ -1,16 +1,17 @@
+# Standardized imports
 import os
 import shutil
+from pathlib import Path
+from typing import Dict
+
 import biotite.structure as structure
 import biotite.structure.io as io
 import biotite.database.rcsb as rcsb
 import biotite.structure.io.pdbx as pdbx
-from pathlib import Path
-import numpy as np
-from biotite.sequence import ProteinSequence
-from typing import Dict
-
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
+from biotite.sequence import ProteinSequence
 from DockQ import DockQ
 
 SRC_DIR = Path(__file__).parent.parent
@@ -19,17 +20,14 @@ BASE_DIR = SRC_DIR.parent
 
 # 1.Utils for playing around with structures / Sequences
 def load_structure(input_str: str, hetero: bool = False) -> structure.AtomArray | None:
-    """
-    Loads a protein structure from a PDB ID (fetching CIF) or a local CIF file path.
-    Automatically detects input type based on string length.
+    """Load a protein structure from a PDB ID or local CIF file path.
 
     Args:
-        input_str (str): The PDB ID or CIF file path.
-        hetero (bool): Whether to load hetero atoms. If False, only load protein atoms.
+        input_str (str): PDB ID or CIF file path.
+        hetero (bool): If True, load hetero atoms; otherwise, only protein atoms.
 
     Returns:
-        AtomArray: The loaded structure.
-        None: If the structure cannot be loaded.
+        structure.AtomArray | None: Loaded structure or None if loading fails.
     """
     try:
         # If input = PDB ID
@@ -55,15 +53,14 @@ def load_structure(input_str: str, hetero: bool = False) -> structure.AtomArray 
         return None
 
 
-def get_sequence(structure: structure.AtomArray) -> str:
-    """
-    Get the sequence from a given Biotite AtomArray as returned by utils.load_structure().
+def get_sequence(structure: structure.AtomArray) -> dict:
+    """Extracts chain sequences from a Biotite AtomArray.
 
     Args:
-        structure (AtomArray): The structure to get the sequence from.
+        structure (structure.AtomArray): Structure to extract sequences from.
 
     Returns:
-        dict: A dictionary of chain IDs and its corresponding sequences.
+        dict: Dictionary mapping chain IDs to sequences.
     """
     sequences = {}
     for chain_id in np.unique(structure.chain_id):

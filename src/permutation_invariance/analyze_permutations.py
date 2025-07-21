@@ -1,17 +1,18 @@
+# Standardized imports
 import json
-from pathlib import Path
-from multiprocessing import Pool
-from tqdm import tqdm
-import numpy as np
-import matplotlib.pyplot as plt
+import warnings
 from collections import defaultdict
+from multiprocessing import Pool
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+from tqdm import tqdm
+
 from ecstasy import utils
 from ecstasy.utils import generate_tm_confusion_matrix
-import matplotlib.pyplot as plt
 
-import warnings
-
-# ignore this warning from biotite
+# Suppress specific biotite warning
 warnings.filterwarnings(
     "ignore",
     message="Attribute 'auth_atom_id' not found within 'atom_site' category. The fallback attribute 'label_atom_id' will be used instead",
@@ -19,14 +20,13 @@ warnings.filterwarnings(
 
 
 def organize_esmfold_predictions(pdb_dir: str) -> dict:
-    """
-    Organize PDB files hierarchically by protein ID and chain count.
+    """Organizes PDB files by protein ID and chain count.
 
     Args:
-        pdb_dir: Directory containing PDB files
+        pdb_dir (str): Directory containing PDB files.
 
     Returns:
-        dict: Hierarchical organization {n_chains: {protein_id: [file_paths]}}
+        dict: {n_chains: {protein_id: [file_paths]}}
     """
     pdb_path = Path(pdb_dir)
     organized_files = defaultdict(lambda: defaultdict(list))
@@ -59,14 +59,13 @@ def organize_esmfold_predictions(pdb_dir: str) -> dict:
 
 
 def organize_boltz_predictions(predictions_dir: str) -> dict:
-    """
-    Organize Boltz prediction files hierarchically by protein ID and chain count.
+    """Organizes Boltz prediction files by protein ID and chain count.
 
     Args:
-        predictions_dir: Directory containing Boltz prediction subdirectories
+        predictions_dir (str): Directory containing Boltz prediction subdirectories.
 
     Returns:
-        dict: Hierarchical organization {n_chains: {protein_id: {permutation: [file_paths]}}}
+        dict: {n_chains: {protein_id: {permutation: [file_paths]}}}
     """
     predictions_path = Path(predictions_dir)
     organized_files = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
@@ -147,24 +146,27 @@ def organize_colabfold_predictions(predictions_dir: str, relaxed: bool = True) -
 def process_permutation_invariance(
     organized_files: dict, output_dir: str, n_cpus: int = 128
 ):
-    """
-    Process permutation invariance for a given set of files.
+    """Processes permutation invariance for a given set of files.
+
+    Args:
+        organized_files (dict): Organized file structure.
+        output_dir (str): Output directory.
+        n_cpus (int, optional): Number of CPUs to use. Defaults to 128.
     """
     pass
 
 
 def process_seeds_for_a_single_permutation(
     path_to_model_seeds: list[str], num_cpus: int = 128
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Process seeds for a single prediction.
+) -> list:
+    """Processes seeds for a single prediction.
 
     Args:
-        path_to_model_seeds (list[str]): List of paths to model seeds
-        num_cpus (int): Number of CPUs to use
+        path_to_model_seeds (list[str]): List of paths to model seeds.
+        num_cpus (int, optional): Number of CPUs to use. Defaults to 128.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: TM scores and DockQ scores
+        list: List of results from pairwise comparisons.
     """
 
     num_model_seeds = len(path_to_model_seeds)
@@ -196,6 +198,16 @@ def process_seeds_for_all_permutations(
     output_dir: str,
     n_cpus: int = 128,
 ):
+    """Processes all permutations for all proteins using multiprocessing.
+
+    Args:
+        organized_files (dict): Organized file structure.
+        output_dir (str): Output directory for results.
+        n_cpus (int, optional): Number of CPUs to use. Defaults to 128.
+
+    Returns:
+        dict: Results of all pairwise comparisons.
+    """
     # generate a list of comparision jobs for multiprocessing
 
     jobs = []
@@ -257,6 +269,14 @@ def process_seeds_for_all_permutations(
 
 
 def _wrapper_do_monomer_and_multimer_comparision(job: tuple):
+    """Wrapper for monomer and multimer comparison for multiprocessing.
+
+    Args:
+        job (tuple): Job tuple containing indices, file paths, and metadata.
+
+    Returns:
+        tuple: Results including scores and metadata.
+    """
     i, j, file_i_path, file_j_path, n_chain, protein_id, permutation_number = job
     dockq, tm, iptm = do_monomer_and_multimer_comparision((file_i_path, file_j_path))
     return (
@@ -274,14 +294,13 @@ def _wrapper_do_monomer_and_multimer_comparision(job: tuple):
 def do_monomer_and_multimer_comparision(
     file_path_pair: tuple[str, str],
 ) -> tuple[float, float, float]:
-    """
-    Do monomer and multimer comparision for a given pair of files.
+    """Performs monomer and multimer comparison for a given pair of files.
 
     Args:
-        file_i_path (str): Path to the first file
-        file_j_path (str): Path to the second file
+        file_path_pair (tuple[str, str]): Tuple of file paths.
+
     Returns:
-        tuple[float, float, float]: DockQ score, TM score, iPTM Product
+        tuple[float, float, float]: DockQ score, TM score, iPTM product.
     """
     # protein structures for TM Score comparison
     file_i_path, file_j_path = file_path_pair
@@ -325,14 +344,13 @@ def do_monomer_and_multimer_comparision(
 
 
 def calculate_tm_statistics(organized_files: dict) -> dict:
-    """
-    Calculate mean and std TM scores for each protein and chain count.
+    """Calculates mean and std TM scores for each protein and chain count.
 
     Args:
-        organized_files: Hierarchical organization of PDB files
+        organized_files (dict): Organized PDB file structure.
 
     Returns:
-        dict: Statistics for each chain count and protein
+        dict: Statistics for each chain count and protein.
     """
     statistics = {}
 
@@ -380,12 +398,11 @@ def calculate_tm_statistics(organized_files: dict) -> dict:
 
 
 def plot_tm_statistics(statistics: dict, output_dir: str = None):
-    """
-    Plot mean and standard deviation TM scores for each protein, separated by chain count.
+    """Plots mean and standard deviation TM scores for each protein, separated by chain count.
 
     Args:
-        statistics: TM score statistics for each chain count and protein
-        output_dir: Directory to save plots
+        statistics (dict): TM score statistics for each chain count and protein.
+        output_dir (str, optional): Directory to save plots. Defaults to None.
     """
     if not statistics:
         print("No statistics to plot")
@@ -497,6 +514,12 @@ def plot_tm_statistics(statistics: dict, output_dir: str = None):
 
 
 def plot_iptm_vs_scores_heatmaps(json_path: str, output_dir: str = None):
+    """Plots heatmaps and histograms for iPTM, DockQ, and TM scores from a JSON file.
+
+    Args:
+        json_path (str): Path to JSON file with scores.
+        output_dir (str, optional): Directory to save plots. Defaults to None.
+    """
 
     # Load JSON
     with open(json_path, "r") as f:

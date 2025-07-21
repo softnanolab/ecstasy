@@ -1,19 +1,16 @@
 """
-This script is used to profile the basic performance of the ESMFold and Boltz
-predictions.
+This script profiles the basic performance of ESMFold and Boltz predictions.
 """
 
-from pathlib import Path
-from collections import defaultdict
-
-
-import warnings
 import json
+import warnings
+from collections import defaultdict
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
-
-# ignore this warning from biotite
+# Suppress specific biotite warning
 warnings.filterwarnings(
     "ignore",
     message="Attribute 'auth_atom_id' not found within 'atom_site' category. The fallback attribute 'label_atom_id' will be used instead",
@@ -25,9 +22,12 @@ def plot_benchmark_stacked_bars(
     pdb_features_json_path: str,
     output_prefix: str = "benchmark_plot",
 ):
-    """
-    Plots three separate stacked bar charts for time, peak memory, and current memory usage
-    for each submodule across sequence lengths.
+    """Plot stacked bar charts for time, peak memory, and current memory usage by submodule.
+
+    Args:
+        benchmark_json_path (str): Path to benchmark JSON file.
+        pdb_features_json_path (str): Path to PDB features JSON file.
+        output_prefix (str): Prefix for output plot files.
     """
     # Load benchmark data
     with open(benchmark_json_path, "r") as f:

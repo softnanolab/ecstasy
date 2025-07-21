@@ -1,13 +1,16 @@
-import os
-import json
-import itertools
-from pathlib import Path
-import fire
-import random
-from ecstasy import utils
-import pandas as pd
-from typing import Optional
+# Standardized imports
 import datetime
+import itertools
+import json
+import os
+import random
+from pathlib import Path
+from typing import Optional
+
+import fire
+import pandas as pd
+
+from ecstasy import utils
 
 SRC_DIR = Path(__file__).parent.parent.parent
 
@@ -19,10 +22,10 @@ class ChainPermutationGenerator:
         pdb_features_path: str,
         output_dir: str,
     ):
-        """Initialize the generator with paths for input and output.
+        """Initializes the generator with paths for input and output.
 
         Args:
-            pdb_features: Path to the JSON file containing PDB features
+            pdb_features_path: Path to the JSON file containing PDB features
             output_dir: Directory where the permutation FASTA files will be saved
         """
 
@@ -38,25 +41,25 @@ class ChainPermutationGenerator:
             self.sabdab_db = pd.read_csv(f, sep="\t")
 
     def _filter_unique_chain_lengths(self, protein: dict) -> bool:
-        """Filter to ensure all chains have unique lengths.
+        """Checks if all chains have unique lengths.
 
         Args:
-            protein (dict): Protein dictionary containing chain lengths
+            protein (dict): Protein dictionary with chain lengths.
 
         Returns:
-            bool: True if all chains have unique lengths, False otherwise
+            bool: True if all chains have unique lengths, False otherwise.
         """
         chain_lengths = protein["chain_lengths"].values()
         return len(set(chain_lengths)) == len(chain_lengths)
 
     def _filter_not_in_sabdab(self, protein: dict) -> bool:
-        """Filter to exclude proteins in SAbDab database.
+        """Filters out proteins in SAbDab database.
 
         Args:
-            protein (dict): Protein dictionary containing PDB ID
+            protein (dict): Protein dictionary containing PDB ID.
 
         Returns:
-            bool: True if protein is not in SAbDab database, False otherwise
+            bool: True if protein is not in SAbDab database, False otherwise.
         """
         pdb_id = protein["pdb_id"].lower()
         is_in_sabdab = pdb_id in self.sabdab_db["pdb"].str.lower().values
@@ -64,55 +67,55 @@ class ChainPermutationGenerator:
         return not is_in_sabdab
 
     def _filter_min_chain_length(self, protein: dict, min_chain_length: int) -> bool:
-        """Filter to ensure all chains have lengths greater than min_chain_length.
+        """Filters to ensure all chains have lengths greater than min_chain_length.
 
         Args:
-            protein (dict): Protein dictionary containing chain lengths
-            min_chain_length (int): Minimum chain length to filter by
+            protein (dict): Protein dictionary containing chain lengths.
+            min_chain_length (int): Minimum chain length to filter by.
 
         Returns:
-            bool: True if all chains have lengths greater than min_chain_length, False otherwise
+            bool: True if all chains have lengths greater than min_chain_length, False otherwise.
         """
         return all(
             length > min_chain_length for length in protein["chain_lengths"].values()
         )
 
     def _filter_max_total_length(self, protein: dict, max_total_length: int) -> bool:
-        """Filter to ensure the protein has a total chain length less than max_total_length.
+        """Filters to ensure the protein has a total chain length less than max_total_length.
 
         Args:
-            protein (dict): Protein dictionary containing chain lengths
-            max_total_length (int): Maximum total chain length to filter by
+            protein (dict): Protein dictionary containing chain lengths.
+            max_total_length (int): Maximum total chain length to filter by.
 
         Returns:
-            bool: True if protein has a total chain length less than max_total_length, False otherwise
+            bool: True if protein has a total chain length less than max_total_length, False otherwise.
         """
         return sum(protein["chain_lengths"].values()) <= max_total_length
 
     def _filter_num_chains(self, protein: dict, num_chains: int) -> bool:
-        """Filter to ensure the protein has the correct number of chains.
+        """Filters to ensure the protein has the correct number of chains.
 
         Args:
-            protein (dict): Protein dictionary containing chain lengths
-            num_chains (int): Number of chains to filter by
+            protein (dict): Protein dictionary containing chain lengths.
+            num_chains (int): Number of chains to filter by.
 
         Returns:
-            bool: True if protein has the correct number of chains, False otherwise
+            bool: True if protein has the correct number of chains, False otherwise.
         """
         return protein["num_chains"] == num_chains
 
     def _filter_date_cutoff(
         self, protein: dict, date_cutoff_before: str, date_cutoff_after: str
     ) -> bool:
-        """Filter to ensure the protein was deposited after date_cutoff_after and before date_cutoff_before.
+        """Filters to ensure the protein was deposited after date_cutoff_after and before date_cutoff_before.
 
         Args:
-            protein (dict): Protein dictionary containing PDB ID
-            date_cutoff_before (str): Date cutoff before
-            date_cutoff_after (str): Date cutoff after
+            protein (dict): Protein dictionary containing PDB ID.
+            date_cutoff_before (str): Date cutoff before.
+            date_cutoff_after (str): Date cutoff after.
 
         Returns:
-            bool: True if protein was deposited after date_cutoff_after and before date_cutoff_before, False otherwise
+            bool: True if protein was deposited after date_cutoff_after and before date_cutoff_before, False otherwise.
         """
         protein_date = datetime.datetime.fromtimestamp(protein["date"])
         if date_cutoff_after:
@@ -132,10 +135,10 @@ class ChainPermutationGenerator:
         return date_cutoff_after < protein_date < date_cutoff_before
 
     def generate_permutations(self, pdb_id: str) -> bool:
-        """Generate FASTA files with chain permutations for a PDB structure.
+        """Generates FASTA files with chain permutations for a PDB structure.
 
         Args:
-            pdb_id: PDB ID or CIF file path
+            pdb_id: PDB ID or CIF file path.
         """
         # obtain a dict of chain id and sequences
         protein_sequences = utils.get_sequence(utils.load_structure(pdb_id))
@@ -177,13 +180,13 @@ class ChainPermutationGenerator:
         filter_date_cutoff_after: Optional[str],
     ):
         """
-        Generate permutations for proteins with unique chain lengths and lengths greater than min_chain_length.
+        Generates permutations for proteins with unique chain lengths and lengths greater than min_chain_length.
         Args:
-            total_num_chains (list[int]): List of total number of chains to generate permutations for
-            num_samples (int): Number of proteins to sample for each chain number
+            total_num_chains (list[int]): List of total number of chains to generate permutations for.
+            num_samples (int): Number of proteins to sample for each chain number.
             filter_abs (bool): Whether to filter Antibodies from SAbDab. (default: False)
-            filter_min_chain_length (int): Minimum chain length to generate permutations for
-            filter_max_total_length (int): Maximum total chain length to generate permutations for
+            filter_min_chain_length (int): Minimum chain length to generate permutations for.
+            filter_max_total_length (int): Maximum total chain length to generate permutations for.
             filter_unique_chain_lengths (bool): Whether to filter proteins with non-unique chain lengths. (default: True)
             filter_date_cutoff_before (str): Date cutoff before to generate permutations for. In format "2025-01-01"
             filter_date_cutoff_after (str): Date cutoff after to generate permutations for. In format "2025-01-01"
@@ -256,28 +259,19 @@ def run_generate_permutations(
     filter_date_cutoff_after: Optional[str] = None,
     filter_abs: Optional[bool] = None,
 ):
-    """
-    Main function to generate chain permutations.
+    """Main function to generate chain permutations.
 
     Args:
-        pdb_features (str): Path to the JSON file containing PDB features
-        output_dir (str): Directory where the permutation FASTA files will be saved
-        total_num_chains (list[int]): List of total number of chains to generate permutations for
-            (default: [2, 3, 4])
-        num_samples (int): Number of proteins to sample for each chain number
-            (default: 10)
-        filter_min_chain_length (int): Minimum chain length to generate permutations for
-            (default: None)
-        filter_max_total_length (int): Maximum total chain length to generate permutations for
-            (default: None)
-        filter_unique_chain_lengths (bool): Whether to filter proteins with non-unique chain lengths.
-            (default: None)
-        filter_date_cutoff_before (str): Date cutoff before to generate permutations for. In format "2025-01-01"
-            (default: None)
-        filter_date_cutoff_after (str): Date cutoff after to generate permutations for. In format "2025-01-01"
-            (default: None)
-        filter_abs (bool): Whether to filter Antibodies from SAbDab
-            (default: None)
+        pdb_features (str): Path to the JSON file containing PDB features.
+        output_dir (str): Directory where the permutation FASTA files will be saved.
+        num_samples (int): Number of proteins to sample for each chain number.
+        total_num_chains (list[int], optional): List of total number of chains to generate permutations for. Defaults to [2, 3, 4].
+        filter_min_chain_length (int, optional): Minimum chain length to generate permutations for. Defaults to None.
+        filter_max_total_length (int, optional): Maximum total chain length to generate permutations for. Defaults to None.
+        filter_unique_chain_lengths (bool, optional): Whether to filter proteins with non-unique chain lengths. Defaults to None.
+        filter_date_cutoff_before (str, optional): Date cutoff before to generate permutations for. Defaults to None.
+        filter_date_cutoff_after (str, optional): Date cutoff after to generate permutations for. Defaults to None.
+        filter_abs (bool, optional): Whether to filter Antibodies from SAbDab. Defaults to None.
     """
     generator = ChainPermutationGenerator(pdb_features, output_dir)
 
