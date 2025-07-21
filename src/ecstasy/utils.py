@@ -16,6 +16,7 @@ from DockQ import DockQ
 SRC_DIR = Path(__file__).parent.parent
 BASE_DIR = SRC_DIR.parent
 
+
 # 1.Utils for playing around with structures / Sequences
 def load_structure(input_str: str, hetero: bool = False) -> structure.AtomArray | None:
     """

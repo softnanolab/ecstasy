@@ -2,9 +2,9 @@
 This script is used to profile the basic performance of the ESMFold and Boltz
 predictions.
 """
+
 from pathlib import Path
 from collections import defaultdict
-
 
 
 import warnings
@@ -23,7 +23,7 @@ warnings.filterwarnings(
 def plot_benchmark_stacked_bars(
     benchmark_json_path: str,
     pdb_features_json_path: str,
-    output_prefix: str = "benchmark_plot"
+    output_prefix: str = "benchmark_plot",
 ):
     """
     Plots three separate stacked bar charts for time, peak memory, and current memory usage
@@ -105,4 +105,3 @@ def plot_benchmark_stacked_bars(
     plot_stacked(time_data, "Time (s)", "time")
     plot_stacked(peak_mem_data, "Peak Memory Usage (GB)", "peak_memory")
     plot_stacked(curr_mem_data, "Current Memory Usage (GB)", "current_memory")
-

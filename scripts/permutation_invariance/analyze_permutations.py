@@ -38,9 +38,9 @@ def organize_esmfold_predictions(pdb_dir: str) -> dict:
         # Parse filename to extract n_chains and protein_id
         # Expected format: n{num_chains}_{protein_id}_p{permutation}.pdb
         filename = pdb_file.stem
-        parts = filename.split('_')
+        parts = filename.split("_")
 
-        if len(parts) >= 3 and parts[0].startswith('n'):
+        if len(parts) >= 3 and parts[0].startswith("n"):
             try:
                 n_chains = int(parts[0][1:])  # Extract number after 'n'
                 protein_id = parts[1]
@@ -327,10 +327,10 @@ def do_monomer_and_multimer_comparision(
 def calculate_tm_statistics(organized_files: dict) -> dict:
     """
     Calculate mean and std TM scores for each protein and chain count.
-    
+
     Args:
         organized_files: Hierarchical organization of PDB files
-        
+
     Returns:
         dict: Statistics for each chain count and protein
     """
@@ -342,7 +342,9 @@ def calculate_tm_statistics(organized_files: dict) -> dict:
         chain_statistics = {}
 
         for protein_id, file_paths in proteins.items():
-            print(f"  Processing protein {protein_id} with {len(file_paths)} permutations")
+            print(
+                f"  Processing protein {protein_id} with {len(file_paths)} permutations"
+            )
 
             # Load structures
             structures = [utils.load_structure(fp) for fp in file_paths]
@@ -360,15 +362,17 @@ def calculate_tm_statistics(organized_files: dict) -> dict:
             # Calculate statistics for this protein
             if len(upper_triangle) > 0:
                 chain_statistics[protein_id] = {
-                    'mean': np.mean(upper_triangle),
-                    'std': np.std(upper_triangle),
-                    'count': len(upper_triangle),
-                    'scores': upper_triangle,
-                    'total_length': total_length
+                    "mean": np.mean(upper_triangle),
+                    "std": np.std(upper_triangle),
+                    "count": len(upper_triangle),
+                    "scores": upper_triangle,
+                    "total_length": total_length,
                 }
-                print(f"    {protein_id}: mean={chain_statistics[protein_id]['mean']:.3f}, "
-                      f"std={chain_statistics[protein_id]['std']:.3f}, n={chain_statistics[protein_id]['count']}, "
-                      f"total_length={total_length}")
+                print(
+                    f"    {protein_id}: mean={chain_statistics[protein_id]['mean']:.3f}, "
+                    f"std={chain_statistics[protein_id]['std']:.3f}, n={chain_statistics[protein_id]['count']}, "
+                    f"total_length={total_length}"
+                )
 
         statistics[n_chains] = chain_statistics
 
@@ -493,7 +497,7 @@ def plot_tm_statistics(statistics: dict, output_dir: str = None):
 
 
 def plot_iptm_vs_scores_heatmaps(json_path: str, output_dir: str = None):
-    
+
     # Load JSON
     with open(json_path, "r") as f:
         data = json.load(f)
