@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from ecstasy import utils
 from ecstasy.utils import generate_tm_confusion_matrix
+import matplotlib.pyplot as plt
 
 import warnings
 
@@ -99,6 +100,48 @@ def organize_boltz_predictions(predictions_dir: str) -> dict:
                 continue
 
     return dict(organized_files)
+
+
+def organize_colabfold_predictions(predictions_dir: str, relaxed: bool = True) -> dict:
+    """
+    Organize ColabFold prediction files hierarchically by protein ID and chain count.
+    """
+    from collections import defaultdict
+    from pathlib import Path
+
+    predictions_path = Path(predictions_dir)
+    organized_files = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+
+    # Each permutation is stored in its own directory e.g. n4_6DFS_p1/
+    prediction_dirs = [d for d in predictions_path.iterdir() if d.is_dir()]
+
+    for pred_dir in prediction_dirs:
+        dirname = pred_dir.name
+        parts = dirname.split("_")
+
+        # Expected format: n{num_chains}_{protein_id}_p{permutation}
+        if len(parts) >= 3 and parts[0].startswith("n") and parts[2].startswith("p"):
+            try:
+                n_chains = int(parts[0][1:])
+                protein_id = parts[1]
+                permutation_number = int(parts[2][1:])
+            except ValueError:
+                continue
+
+            # Prefer unrelaxed models (smaller) but fall back to relaxed models
+            if relaxed:
+                pdb_files = sorted(pred_dir.glob("*_relaxed_*.pdb"))
+            else:
+                pdb_files = sorted(pred_dir.glob("*_unrelaxed_*.pdb"))
+
+            organized_files[n_chains][protein_id][permutation_number] = [
+                str(pdb) for pdb in pdb_files
+            ]
+
+    # Convert to plain dicts
+    return {
+        k: {kk: dict(vv) for kk, vv in v.items()} for k, v in organized_files.items()
+    }
 
 
 def process_permutation_invariance(
@@ -238,7 +281,7 @@ def do_monomer_and_multimer_comparision(
         file_i_path (str): Path to the first file
         file_j_path (str): Path to the second file
     Returns:
-        tuple[float, float]: DockQ score, TM score
+        tuple[float, float, float]: DockQ score, TM score, iPTM Product
     """
     # protein structures for TM Score comparison
     file_i_path, file_j_path = file_path_pair
@@ -262,11 +305,20 @@ def do_monomer_and_multimer_comparision(
     tm_score /= len(chain_map)
 
     # get the iptm scores for the two proteins
-    with open(utils.get_confidence_file_path_boltz(file_i_path), "r") as f:
-        file_i_iptm = json.load(f)["protein_iptm"]
+    if file_i_path.endswith(".cif") and file_j_path.endswith(".cif"):
+        # Boltz format
+        with open(utils.get_confidence_file_path_boltz(file_i_path), "r") as f:
+            file_i_iptm = json.load(f)["protein_iptm"]
 
-    with open(utils.get_confidence_file_path_boltz(file_j_path), "r") as f:
-        file_j_iptm = json.load(f)["protein_iptm"]
+        with open(utils.get_confidence_file_path_boltz(file_j_path), "r") as f:
+            file_j_iptm = json.load(f)["protein_iptm"]
+    else:
+        # ColabFold format
+        with open(utils.get_confidence_file_path_colabfold(file_i_path), "r") as f:
+            file_i_iptm = json.load(f)["iptm"]
+
+        with open(utils.get_confidence_file_path_colabfold(file_j_path), "r") as f:
+            file_j_iptm = json.load(f)["iptm"]
 
     # return dockq score, tm score, and the product of the two iptm scores
     return dockq_score, tm_score, file_i_iptm * file_j_iptm
@@ -283,28 +335,28 @@ def calculate_tm_statistics(organized_files: dict) -> dict:
         dict: Statistics for each chain count and protein
     """
     statistics = {}
-    
+
     for n_chains, proteins in organized_files.items():
         print(f"Processing {n_chains}-chain proteins...")
-        
+
         chain_statistics = {}
-        
+
         for protein_id, file_paths in proteins.items():
             print(f"  Processing protein {protein_id} with {len(file_paths)} permutations")
-            
+
             # Load structures
             structures = [utils.load_structure(fp) for fp in file_paths]
-            
+
             # Calculate total chain length for this protein (using first structure)
             protein_sequences = utils.get_sequence(structures[0])
             total_length = sum(len(seq) for seq in protein_sequences.values())
-            
+
             # Calculate TM confusion matrix
             tm_matrix = generate_tm_confusion_matrix(structures, return_matrix=True)
-            
+
             # Extract upper triangle (excluding diagonal) for pairwise comparisons
             upper_triangle = tm_matrix[np.triu_indices_from(tm_matrix, k=1)]
-            
+
             # Calculate statistics for this protein
             if len(upper_triangle) > 0:
                 chain_statistics[protein_id] = {
@@ -317,16 +369,16 @@ def calculate_tm_statistics(organized_files: dict) -> dict:
                 print(f"    {protein_id}: mean={chain_statistics[protein_id]['mean']:.3f}, "
                       f"std={chain_statistics[protein_id]['std']:.3f}, n={chain_statistics[protein_id]['count']}, "
                       f"total_length={total_length}")
-        
+
         statistics[n_chains] = chain_statistics
-    
+
     return statistics
 
 
 def plot_tm_statistics(statistics: dict, output_dir: str = None):
     """
     Plot mean and standard deviation TM scores for each protein, separated by chain count.
-    
+
     Args:
         statistics: TM score statistics for each chain count and protein
         output_dir: Directory to save plots
@@ -344,30 +396,45 @@ def plot_tm_statistics(statistics: dict, output_dir: str = None):
 
         # Get protein IDs and their statistics
         protein_ids = list(protein_stats.keys())
-        means = [protein_stats[pid]['mean'] for pid in protein_ids]
-        stds = [protein_stats[pid]['std'] for pid in protein_ids]
-        total_lengths = [protein_stats[pid]['total_length'] for pid in protein_ids]
+        means = [protein_stats[pid]["mean"] for pid in protein_ids]
+        stds = [protein_stats[pid]["std"] for pid in protein_ids]
+        total_lengths = [protein_stats[pid]["total_length"] for pid in protein_ids]
 
         # Create bar plot with error bars
         x_pos = np.arange(len(protein_ids))
-        bars = plt.bar(x_pos, means, yerr=stds, capsize=5, 
-                       alpha=0.7, color='skyblue', edgecolor='navy')
+        bars = plt.bar(
+            x_pos,
+            means,
+            yerr=stds,
+            capsize=5,
+            alpha=0.7,
+            color="skyblue",
+            edgecolor="navy",
+        )
 
         # Add value labels on bars
         for i, (bar, mean, std) in enumerate(zip(bars, means, stds)):
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height + std + 0.01,
-                    f'{mean:.3f}\n±{std:.3f}', ha='center', va='bottom', fontsize=9)
+            plt.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height + std + 0.01,
+                f"{mean:.3f}\n±{std:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
 
-        plt.xlabel('Protein ID')
-        plt.ylabel('TM Score')
-        plt.title(f'TM Scores for {n_chains}-Chain Proteins')
+        plt.xlabel("Protein ID")
+        plt.ylabel("TM Score")
+        plt.title(f"TM Scores for {n_chains}-Chain Proteins")
 
         # Create labels with protein ID, total length, and sample size
-        labels = [f'{pid}\n({total_lengths[i]} aa, n={protein_stats[pid]["count"]})' 
-                 for i, pid in enumerate(protein_ids)]
+        labels = [
+            f'{pid}\n({total_lengths[i]} aa, n={protein_stats[pid]["count"]})'
+            for i, pid in enumerate(protein_ids)
+        ]
         plt.xticks(x_pos, labels, rotation=45)
-        plt.grid(axis='y', alpha=0.3)
+        plt.grid(axis="y", alpha=0.3)
         plt.ylim(0, 1.1)
 
         plt.tight_layout()
@@ -375,7 +442,11 @@ def plot_tm_statistics(statistics: dict, output_dir: str = None):
         if output_dir:
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
-            plt.savefig(output_path / f'tm_scores_{n_chains}_chains.png', dpi=300, bbox_inches='tight')
+            plt.savefig(
+                output_path / f"tm_scores_{n_chains}_chains.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
             print(f"Plot saved to {output_path / f'tm_scores_{n_chains}_chains.png'}")
 
         plt.show()
@@ -384,9 +455,11 @@ def plot_tm_statistics(statistics: dict, output_dir: str = None):
         plt.figure(figsize=(14, 6))
 
         # Prepare data for box plot
-        box_data = [protein_stats[pid]['scores'] for pid in protein_ids]
-        labels = [f'{pid}\n({total_lengths[i]} aa, n={len(scores)})' 
-                 for i, (pid, scores) in enumerate(zip(protein_ids, box_data))]
+        box_data = [protein_stats[pid]["scores"] for pid in protein_ids]
+        labels = [
+            f"{pid}\n({total_lengths[i]} aa, n={len(scores)})"
+            for i, (pid, scores) in enumerate(zip(protein_ids, box_data))
+        ]
 
         # Create box plot
         bp = plt.boxplot(box_data, tick_labels=labels)
@@ -394,31 +467,33 @@ def plot_tm_statistics(statistics: dict, output_dir: str = None):
         # Add individual data points on top
         for i, scores in enumerate(box_data):
             # Add jitter to x-coordinates to spread out points
-            x_jittered = np.random.normal(i+1, 0.04, len(scores))
-            plt.scatter(x_jittered, scores, alpha=0.6, s=20, color='red', zorder=10)
+            x_jittered = np.random.normal(i + 1, 0.04, len(scores))
+            plt.scatter(x_jittered, scores, alpha=0.6, s=20, color="red", zorder=10)
 
-        plt.xlabel('Protein ID')
-        plt.ylabel('TM Score')
-        plt.title(f'TM Score Distribution for {n_chains}-Chain Proteins')
-        plt.grid(axis='y', alpha=0.3)
+        plt.xlabel("Protein ID")
+        plt.ylabel("TM Score")
+        plt.title(f"TM Score Distribution for {n_chains}-Chain Proteins")
+        plt.grid(axis="y", alpha=0.3)
         plt.ylim(0, 1.1)
         plt.xticks(rotation=45)
 
         plt.tight_layout()
 
         if output_dir:
-            plt.savefig(output_path / f'tm_scores_distribution_{n_chains}_chains.png', dpi=300, bbox_inches='tight')
-            print(f"Distribution plot saved to {output_path / f'tm_scores_distribution_{n_chains}_chains.png'}")
+            plt.savefig(
+                output_path / f"tm_scores_distribution_{n_chains}_chains.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
+            print(
+                f"Distribution plot saved to {output_path / f'tm_scores_distribution_{n_chains}_chains.png'}"
+            )
 
         plt.show()
 
 
 def plot_iptm_vs_scores_heatmaps(json_path: str, output_dir: str = None):
-    import json
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from pathlib import Path
-
+    
     # Load JSON
     with open(json_path, "r") as f:
         data = json.load(f)
@@ -584,74 +659,3 @@ def plot_iptm_vs_scores_heatmaps(json_path: str, output_dir: str = None):
     if output_dir:
         plt.savefig(Path(output_dir) / "iptm_score_cdf.png", dpi=300)
     plt.show()
-
-
-def main(pdb_dir: str, output_dir: str, model_name: str):
-    """
-    Main function to analyze permutation results.
-
-    Args:
-        pdb_dir: Directory containing PDB files
-        output_dir: Directory to save plots (optional)
-        model_name: Name of the model to analyze
-    """
-    assert model_name in [
-        "esmfold",
-        "boltz",
-    ], "Model name must be either 'esmfold' or 'boltz'"
-    print(f"Analyzing PDB files in: {pdb_dir}")
-
-    # Organize files hierarchically
-    if model_name == "esmfold":
-        organized_files = organize_esmfold_predictions(pdb_dir)
-    elif model_name == "boltz":
-        organized_files = organize_boltz_predictions(pdb_dir)
-
-    print("\nFile organization:")
-    for n_chains, proteins in organized_files.items():
-        print(f"{n_chains}-chain proteins: {len(proteins)} proteins")
-        for protein_id, file_paths in proteins.items():
-            print(f"{protein_id}: {len(file_paths)} permutations")
-
-    # Calculate TM statistics
-    print("\nCalculating TM statistics...")
-    statistics = calculate_tm_statistics(organized_files)
-
-    # Plot results
-    print("\nGenerating plots...")
-    plot_tm_statistics(statistics, output_dir)
-
-    # Save statistics to JSON
-    if output_dir:
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        # Convert numpy types to native Python types for JSON serialization
-        json_stats = {}
-        for n_chains, protein_stats in statistics.items():
-            json_stats[n_chains] = {}
-            for protein_id, stats in protein_stats.items():
-                json_stats[n_chains][protein_id] = {
-                    'mean': float(stats['mean']),
-                    'std': float(stats['std']),
-                    'count': int(stats['count']),
-                    'total_length': int(stats['total_length'])
-                }
-
-        with open(output_path / 'tm_statistics.json', 'w') as f:
-            json.dump(json_stats, f, indent=2)
-        print(f"Statistics saved to {output_path / 'tm_statistics.json'}")
-
-
-if __name__ == "__main__":
-    # import fire
-    # fire.Fire(main)
-    organized_boltz = organize_boltz_predictions(
-        "/home/jovyan/workspace/ecstasy/predictions/permutation_test_2/outputs/boltz_no_msa/predictions"
-    )
-
-    process_seeds_for_all_permutations(
-        organized_boltz,
-        output_dir="/home/jovyan/workspace/ecstasy/predictions/permutation_test_2/benchmarks/boltz_no_msas_seeds_comparision.json",
-        n_cpus=156,
-    )

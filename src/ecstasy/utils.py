@@ -520,6 +520,31 @@ def get_confidence_file_path_boltz(cif_file_path: str) -> str:
     return os.path.join(dir_path, confidence_file)
 
 
+def get_confidence_file_path_colabfold(pdb_file_path: str) -> str:
+    """Return the associated *scores* JSON path for a ColabFold PDB file.
+
+    ColabFold writes both *unrelaxed* and *relaxed* PDBs alongside JSON files
+    that contain per-model score metrics such as pTM and ipTM.  The filename
+    pattern is::
+
+        <key>_(un)relaxed_rank_XXX_... .pdb
+        <key>_scores_rank_XXX_... .json
+
+    We derive the JSON path by replacing the substring ``unrelaxed`` or
+    ``relaxed`` with ``scores`` and switching the extension to ``.json``.
+    """
+
+    import re
+
+    dir_path = os.path.dirname(pdb_file_path)
+    filename = os.path.basename(pdb_file_path)
+
+    # Replace the first occurrence of 'unrelaxed' or 'relaxed' with 'scores'
+    filename = re.sub(r"unrelaxed|relaxed", "scores", filename, count=1)
+    confidence_file = filename.replace(".pdb", ".json")
+    return os.path.join(dir_path, confidence_file)
+
+
 def clean_up_colabfold_predictions(predictions_dir: str):
     """Organise ColabFold output files by prediction.
 
