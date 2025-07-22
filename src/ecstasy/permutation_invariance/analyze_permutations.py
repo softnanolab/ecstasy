@@ -839,7 +839,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_iptm_vs_dockq_heatmap.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # Plot iPTM vs TM (probability-normalized counts)
         n_samples_tm = len(tm_scores)
@@ -861,7 +861,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_iptm_vs_tm_heatmap.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # 1D Histogram: DockQ Score (normalized counts)
         plt.figure(figsize=(7, 4))
@@ -882,7 +882,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_dockq_score_histogram.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # 1D Histogram: TM Score (normalized counts)
         plt.figure(figsize=(7, 4))
@@ -903,7 +903,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_tm_score_histogram.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # 1D Histogram: iPTM Score (normalized counts)
         plt.figure(figsize=(7, 4))
@@ -924,7 +924,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_iptm_score_histogram.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # CDF: TM Score
         tm_scores_sorted = np.sort(tm_scores)
@@ -940,7 +940,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_tm_score_cdf.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # CDF: DockQ Score
         dockq_scores_sorted = np.sort(dockq_scores)
@@ -958,7 +958,7 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_dockq_score_cdf.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
 
         # CDF: iPTM Score
         iptm_scores_sorted = np.sort(iptm_scores)
@@ -974,4 +974,4 @@ class AnalyzePermutations:
             Path(self.output_dir) / f"{comparision_type}_iptm_score_cdf.png",
             dpi=300,
         )
-        plt.show()
+        plt.close()
