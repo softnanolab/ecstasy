@@ -724,74 +724,42 @@ class AnalyzePermutations:
         tm_scores = np.asarray(tm_scores)
         iptm_scores = np.asarray(iptm_scores)
 
-        # Plot iPTM vs DockQ (probability-normalized counts)
-        n_samples = len(dockq_scores)
-        weights = np.full(n_samples, 1 / n_samples)
-        plt.figure(figsize=(7, 5))
-        plt.hist2d(
-            iptm_scores,
-            dockq_scores,
-            bins=40,
-            weights=weights,
-            cmap="viridis",
-        )
-        plt.xlabel("iPTM Product")
-        plt.ylabel("DockQ Score")
-        plt.title("iPTM vs DockQ (Probability Mass)")
-        plt.colorbar(label="Probability")
-        plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_iptm_vs_dockq_heatmap.png",
-            dpi=300,
-        )
-        plt.close()
+        # ------------------------------------------------------------------
+        # Create a single figure containing 8 sub-plots arranged in a 4×2 grid
+        # ------------------------------------------------------------------
 
-        # Plot iPTM vs TM (probability-normalized counts)
-        n_samples_tm = len(tm_scores)
-        weights_tm = np.full(n_samples_tm, 1 / n_samples_tm)
-        plt.figure(figsize=(7, 5))
-        plt.hist2d(
+        fig, axs = plt.subplots(4, 2, figsize=(14, 20))
+
+        # Row 1 — Heatmaps
+        # iPTM vs TM (left)
+        im_tm = axs[0, 0].hist2d(
             iptm_scores,
             tm_scores,
             bins=40,
-            weights=weights_tm,
+            weights=np.full(tm_scores.shape, 1 / len(tm_scores)),
             cmap="viridis",
         )
-        plt.xlabel("iPTM Product")
-        plt.ylabel("TM Score")
-        plt.title("iPTM vs TM (Probability Mass)")
-        plt.colorbar(label="Probability")
-        plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_iptm_vs_tm_heatmap.png",
-            dpi=300,
-        )
-        plt.close()
+        axs[0, 0].set_xlabel("iPTM Product")
+        axs[0, 0].set_ylabel("TM Score")
+        axs[0, 0].set_title("iPTM vs TM (Probability Mass)")
+        fig.colorbar(im_tm[3], ax=axs[0, 0], label="Probability")
 
-        # 1D Histogram: DockQ Score (normalized counts)
-        plt.figure(figsize=(7, 4))
-        plt.hist(
+        # iPTM vs DockQ (right)
+        im_dq = axs[0, 1].hist2d(
+            iptm_scores,
             dockq_scores,
             bins=40,
-            color="dodgerblue",
-            edgecolor="black",
-            alpha=0.7,
-            weights=np.ones_like(dockq_scores) / len(dockq_scores),
+            weights=np.full(dockq_scores.shape, 1 / len(dockq_scores)),
+            cmap="viridis",
         )
-        plt.xlabel("DockQ Score")
-        plt.ylabel("Probability")
-        plt.title("Histogram of DockQ Scores (Probability)")
-        plt.ylim(0, 1)
-        plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_dockq_score_histogram.png",
-            dpi=300,
-        )
-        plt.close()
+        axs[0, 1].set_xlabel("iPTM Product")
+        axs[0, 1].set_ylabel("DockQ Score")
+        axs[0, 1].set_title("iPTM vs DockQ (Probability Mass)")
+        fig.colorbar(im_dq[3], ax=axs[0, 1], label="Probability")
 
-        # 1D Histogram: TM Score (normalized counts)
-        plt.figure(figsize=(7, 4))
-        plt.hist(
+        # Row 2 — Histograms
+        # TM histogram (left)
+        axs[1, 0].hist(
             tm_scores,
             bins=40,
             color="seagreen",
@@ -799,20 +767,44 @@ class AnalyzePermutations:
             alpha=0.7,
             weights=np.ones_like(tm_scores) / len(tm_scores),
         )
-        plt.xlabel("TM Score")
-        plt.ylabel("Probability")
-        plt.title("Histogram of TM Scores (Probability)")
-        plt.ylim(0, 1)
-        plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_tm_score_histogram.png",
-            dpi=300,
-        )
-        plt.close()
+        axs[1, 0].set_xlabel("TM Score (normalized)")
+        axs[1, 0].set_ylabel("Probability")
+        axs[1, 0].set_title("Histogram of TM Scores (Probability)")
+        axs[1, 0].set_ylim(0, 1)
 
-        # 1D Histogram: iPTM Score (normalized counts)
-        plt.figure(figsize=(7, 4))
-        plt.hist(
+        # DockQ histogram (right)
+        axs[1, 1].hist(
+            dockq_scores,
+            bins=40,
+            color="dodgerblue",
+            edgecolor="black",
+            alpha=0.7,
+            weights=np.ones_like(dockq_scores) / len(dockq_scores),
+        )
+        axs[1, 1].set_xlabel("DockQ Score (normalized)")
+        axs[1, 1].set_ylabel("Probability")
+        axs[1, 1].set_title("Histogram of DockQ Scores (Probability)")
+        axs[1, 1].set_ylim(0, 1)
+
+        # Row 3 — CDFs
+        tm_sorted = np.sort(tm_scores)
+        tm_cdf = np.arange(1, len(tm_sorted) + 1) / len(tm_sorted)
+        axs[2, 0].plot(tm_sorted, tm_cdf, color="seagreen", lw=2)
+        axs[2, 0].set_xlabel("TM Score")
+        axs[2, 0].set_ylabel("Cumulative Probability")
+        axs[2, 0].set_title("CDF of TM Scores")
+        axs[2, 0].grid(True, alpha=0.3)
+
+        dockq_sorted = np.sort(dockq_scores)
+        dockq_cdf = np.arange(1, len(dockq_sorted) + 1) / len(dockq_sorted)
+        axs[2, 1].plot(dockq_sorted, dockq_cdf, color="dodgerblue", lw=2)
+        axs[2, 1].set_xlabel("DockQ Score")
+        axs[2, 1].set_ylabel("Cumulative Probability")
+        axs[2, 1].set_title("CDF of DockQ Scores")
+        axs[2, 1].grid(True, alpha=0.3)
+
+        # Row 4 — iPTM histogram & CDF
+        axs[3, 0].hist(
             iptm_scores,
             bins=40,
             color="orange",
@@ -820,26 +812,20 @@ class AnalyzePermutations:
             alpha=0.7,
             weights=np.ones_like(iptm_scores) / len(iptm_scores),
         )
-        plt.xlabel("iPTM Product")
-        plt.ylabel("Probability")
-        plt.title("Histogram of iPTM Scores (Probability)")
-        plt.ylim(0, 1)
-        plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_iptm_score_histogram.png",
-            dpi=300,
-        )
-        plt.close()
+        axs[3, 0].set_xlabel("iPTM Product (normalized)")
+        axs[3, 0].set_ylabel("Probability")
+        axs[3, 0].set_title("Histogram of iPTM Scores (Probability)")
+        axs[3, 0].set_ylim(0, 1)
 
-        # CDF: TM Score
-        tm_scores_sorted = np.sort(tm_scores)
-        tm_cdf = np.arange(1, len(tm_scores_sorted) + 1) / len(tm_scores_sorted)
-        plt.figure(figsize=(7, 4))
-        plt.plot(tm_scores_sorted, tm_cdf, color="seagreen", lw=2)
-        plt.xlabel("TM Score")
-        plt.ylabel("Cumulative Probability")
-        plt.title("Cumulative Distribution Function of TM Scores")
-        plt.grid(True, alpha=0.3)
+        iptm_sorted = np.sort(iptm_scores)
+        iptm_cdf = np.arange(1, len(iptm_sorted) + 1) / len(iptm_sorted)
+        axs[3, 1].plot(iptm_sorted, iptm_cdf, color="orange", lw=2)
+        axs[3, 1].set_xlabel("iPTM Product")
+        axs[3, 1].set_ylabel("Cumulative Probability")
+        axs[3, 1].set_title("CDF of iPTM Scores")
+        axs[3, 1].grid(True, alpha=0.3)
+
+        # Adjust spacing and save
         plt.tight_layout()
         plt.savefig(
             Path(self.output_dir) / f"{comparision_type}_tm_score_cdf.png",
@@ -875,8 +861,6 @@ class AnalyzePermutations:
         plt.title("Cumulative Distribution Function of iPTM Scores")
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_iptm_score_cdf.png",
-            dpi=300,
-        )
-        plt.close()
+        out_path = Path(self.output_dir) / f"{comparision_type}_score_boxplots_grid.png"
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
