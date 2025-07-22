@@ -550,7 +550,7 @@ def clean_up_colabfold_predictions(predictions_dir: str):
     """Organise ColabFold output files by prediction.
 
     ColabFold multimer runs often dump many files with long names into a single
-    directory.  For permutation‐invariance experiments we follow the naming
+    directory.  For permutation-invariance experiments we follow the naming
     scheme
 
         n{chains}_{protein_id}_p{perm}<whatever>.<ext>
