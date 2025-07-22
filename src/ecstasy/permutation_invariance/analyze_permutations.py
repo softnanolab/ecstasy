@@ -15,7 +15,6 @@ import numpy as np
 from tqdm import tqdm
 
 from ecstasy import utils
-from ecstasy.utils import generate_tm_confusion_matrix
 
 # Suppress specific biotite warning
 warnings.filterwarnings(
