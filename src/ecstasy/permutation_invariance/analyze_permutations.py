@@ -827,39 +827,117 @@ class AnalyzePermutations:
 
         # Adjust spacing and save
         plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_tm_score_cdf.png",
-            dpi=300,
-        )
-        plt.close()
+        save_path = Path(self.output_dir) / f"{comparision_type}_summary_8plots.png"
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        return
 
-        # CDF: DockQ Score
-        dockq_scores_sorted = np.sort(dockq_scores)
-        dockq_cdf = np.arange(1, len(dockq_scores_sorted) + 1) / len(
-            dockq_scores_sorted
-        )
-        plt.figure(figsize=(7, 4))
-        plt.plot(dockq_scores_sorted, dockq_cdf, color="dodgerblue", lw=2)
-        plt.xlabel("DockQ Score")
-        plt.ylabel("Cumulative Probability")
-        plt.title("Cumulative Distribution Function of DockQ Scores")
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(
-            Path(self.output_dir) / f"{comparision_type}_dockq_score_cdf.png",
-            dpi=300,
-        )
-        plt.close()
+    def plot_permutation_score_boxplots(
+        self,
+        comparision_type: str,
+    ) -> None:
+        """Create one consolidated 3×2 grid of TM & DockQ box-plots coloured by iPTM.
 
-        # CDF: iPTM Score
-        iptm_scores_sorted = np.sort(iptm_scores)
-        iptm_cdf = np.arange(1, len(iptm_scores_sorted) + 1) / len(iptm_scores_sorted)
-        plt.figure(figsize=(7, 4))
-        plt.plot(iptm_scores_sorted, iptm_cdf, color="orange", lw=2)
-        plt.xlabel("iPTM Product")
-        plt.ylabel("Cumulative Probability")
-        plt.title("Cumulative Distribution Function of iPTM Scores")
-        plt.grid(True, alpha=0.3)
+        Layout (rows = chain count):
+            Row 1 → TM (n=2) | DockQ (n=2)
+            Row 2 → TM (n=3) | DockQ (n=3)
+            Row 3 → TM (n=4) | DockQ (n=4)
+
+        The figure is saved to ``<output_dir>/<comparision_type>_score_boxplots_grid.png``.
+        """
+
+        assert comparision_type in [
+            "seeds",
+            "permutations",
+        ], f"Invalid comparision type: {comparision_type}. Must be one of 'seeds', 'permutations'."
+
+        # Mapping from score label to the index inside the tuple returned by
+        # *compare_permutations*
+        score_map = {"tm": 1, "dockq": 0}  # left col uses tm, right col dockq
+
+        # Load the comparison JSON
+        with open(
+            Path(self.output_dir) / f"{comparision_type}_comparisons.json", "r"
+        ) as f:
+            comparison_results = json.load(f)
+
+        # Prepare a fixed grid for n_chains = 2,3,4
+        chain_order = [2, 3, 4]
+        fig, axs = plt.subplots(3, 2, figsize=(16, 18))
+
+        for row_idx, n_chains in enumerate(chain_order):
+            proteins = (
+                comparison_results.get(str(n_chains), {})
+                if isinstance(list(comparison_results.keys())[0], str)
+                else comparison_results.get(n_chains, {})
+            )
+
+            # Collect per-protein data once, reuse for both TM and DockQ axes
+            protein_ids: list[str] = []
+            values_by_score: dict[str, list[list[float]]] = {"tm": [], "dockq": []}
+            iptm_by_protein: list[list[float]] = []
+
+            for protein_id, pair_dict in proteins.items():
+                tm_vals: list[float] = []
+                dockq_vals: list[float] = []
+                iptms: list[float] = []
+                for triplet in pair_dict.values():
+                    if not isinstance(triplet, (list, tuple)) or len(triplet) != 3:
+                        continue
+                    dockq_val, tm_val, iptm_val = triplet
+                    if None in (dockq_val, tm_val, iptm_val):
+                        continue
+                    tm_vals.append(tm_val)
+                    dockq_vals.append(dockq_val)
+                    iptms.append(iptm_val)
+
+                if tm_vals:  # Only if data collected
+                    protein_ids.append(protein_id)
+                    values_by_score["tm"].append(tm_vals)
+                    values_by_score["dockq"].append(dockq_vals)
+                    iptm_by_protein.append(iptms)
+
+            # Iterate over the two columns (0 → TM  | 1 → DockQ)
+            for col_idx, score_label in enumerate(["tm", "dockq"]):
+                ax = axs[row_idx, col_idx]
+
+                if not protein_ids:
+                    ax.axis("off")
+                    continue
+
+                # Box plot
+                ax.boxplot(values_by_score[score_label], patch_artist=True)
+
+                # Scatter overlay with iPTM colouring (use same iptm list for either TM/DockQ)
+                scatter_handle = None
+                for prot_idx, score_list in enumerate(values_by_score[score_label]):
+                    iptm_list = iptm_by_protein[prot_idx]
+                    x_center = prot_idx + 1
+                    x_jitter = np.random.normal(x_center, 0.06, len(score_list))
+                    scatter_handle = ax.scatter(
+                        x_jitter,
+                        score_list,
+                        c=iptm_list,
+                        cmap="viridis",
+                        edgecolors="black",
+                        alpha=0.8,
+                        s=30,
+                        zorder=10,
+                    )
+
+                ax.set_xlabel("Protein ID")
+                ax.set_ylabel("TM Score" if score_label == "tm" else "DockQ Score")
+                ax.set_title(f"{score_label.upper()} Score (n={n_chains})")
+                ax.set_xticks(np.arange(1, len(protein_ids) + 1))
+                ax.set_xticklabels(protein_ids, rotation=45, ha="right")
+                ax.set_ylim(0, 1.05)
+                ax.grid(axis="y", alpha=0.3)
+
+                # Colour-bar only once per axis
+                if scatter_handle is not None:
+                    cbar = fig.colorbar(scatter_handle, ax=ax)
+                    cbar.set_label("iPTM Product")
+
         plt.tight_layout()
         out_path = Path(self.output_dir) / f"{comparision_type}_score_boxplots_grid.png"
         fig.savefig(out_path, dpi=300, bbox_inches="tight")
