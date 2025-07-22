@@ -143,17 +143,139 @@ def organize_colabfold_predictions(predictions_dir: str, relaxed: bool = True) -
     }
 
 
-def process_permutation_invariance(
-    organized_files: dict, output_dir: str, n_cpus: int = 128
+def process_all_permutations_for_all_proteins(
+    organized_files: dict,
+    output_dir: str,
+    n_cpus: int = 128,
 ):
-    """Processes permutation invariance for a given set of files.
+    """Compare the *best* model seed of every permutation against all other permutations.
+
+    This is similar to :func:`process_seeds_for_all_permutations` but **only** the
+    highest-ranked (by iPTM score) model seed of each permutation is considered.
+
+    The procedure is:
+        1. For every protein and every permutation, load the confidence JSON of
+           each model seed and select the file with the highest iPTM score.
+        2. Create pairwise comparison jobs **between permutations** (not seeds).
+        3. Run the comparisons in parallel and collect DockQ, TM and product
+           iPTM scores.
+
+    The resulting nested dictionary structure is::
+
+        results[n_chains][protein_id]["{perm_i}_{perm_j}"] = (dockq, tm, iptm)
+
+    where *perm_i* and *perm_j* are permutation indices with ``perm_i > perm_j``.
 
     Args:
-        organized_files (dict): Organized file structure.
-        output_dir (str): Output directory.
-        n_cpus (int, optional): Number of CPUs to use. Defaults to 128.
+        organized_files (dict):
+            Mapping ``{n_chains: {protein_id: {permutation: [model_files]}}}`` as
+            produced by :func:`organize_boltz_predictions` or
+            :func:`organize_colabfold_predictions`.
+        output_dir (str): JSON file path to write the results to.
+        n_cpus (int, optional): Number of worker processes for multiprocessing.
+            Default is ``128``.
+
+    Returns:
+        dict: Nested results dictionary as described above.
     """
-    pass
+
+    from math import inf
+
+    jobs: list[tuple] = []
+    results: dict = {}
+
+    for n_chain, proteins in organized_files.items():
+        results[n_chain] = {}
+        for protein_id, permutations in proteins.items():
+            results[n_chain][protein_id] = {}
+
+            # Determine best seed (highest iptm) for every permutation
+            best_seed_paths: dict[int, str] = {}
+            for permutation_number, file_paths in permutations.items():
+                best_iptm = -inf
+                best_path = None
+
+                for file_path in file_paths:
+                    try:
+                        if file_path.endswith(".cif"):
+                            # Boltz format
+                            conf_path = utils.get_confidence_file_path_boltz(file_path)
+                            with open(conf_path, "r") as f:
+                                iptm_val = json.load(f)["protein_iptm"]
+                        else:
+                            # ColabFold format (PDB)
+                            conf_path = utils.get_confidence_file_path_colabfold(
+                                file_path
+                            )
+                            with open(conf_path, "r") as f:
+                                iptm_val = json.load(f)["iptm"]
+                    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+                        # Skip files with missing/invalid confidence JSON
+                        continue
+
+                    if iptm_val > best_iptm:
+                        best_iptm = iptm_val
+                        best_path = file_path
+
+                if best_path is not None:
+                    best_seed_paths[permutation_number] = best_path
+
+            # Create pairwise jobs between permutations using the best seeds
+            perm_numbers = list(best_seed_paths.keys())
+            for i in range(len(perm_numbers)):
+                for j in range(len(perm_numbers)):
+                    if i > j:
+                        perm_i = perm_numbers[i]
+                        perm_j = perm_numbers[j]
+                        fp_i = best_seed_paths[perm_i]
+                        fp_j = best_seed_paths[perm_j]
+
+                        # Reserve dictionary entry; will be filled after multiprocessing
+                        results[n_chain][protein_id][f"{perm_i}_{perm_j}"] = ()
+
+                        jobs.append(
+                            (
+                                perm_i,
+                                perm_j,
+                                fp_i,
+                                fp_j,
+                                n_chain,
+                                protein_id,
+                            )
+                        )
+
+    # Execute comparisons in parallel
+    if jobs:
+        with Pool(processes=n_cpus) as pool:
+            multiprocessing_results = list(
+                tqdm(
+                    pool.imap(_wrapper_compare_best_seed_permutations, jobs),
+                    total=len(jobs),
+                    desc="Pairwise comparisons (best seeds)",
+                )
+            )
+
+        # Populate results dictionary
+        for (
+            dockq,
+            tm,
+            iptm,
+            n_chain_res,
+            protein_id_res,
+            perm_i_res,
+            perm_j_res,
+        ) in multiprocessing_results:
+            results[n_chain_res][protein_id_res][f"{perm_i_res}_{perm_j_res}"] = (
+                dockq,
+                tm,
+                iptm,
+            )
+
+    # Write results to JSON
+    with open(output_dir, "w") as f:
+        json.dump(results, f, indent=4)
+
+    return results
 
 
 def process_seeds_for_a_single_permutation(
@@ -268,7 +390,7 @@ def process_seeds_for_all_permutations(
     return results
 
 
-def _wrapper_do_monomer_and_multimer_comparision(job: tuple):
+def _wrapper_do_monomer_and_multimer_comparision(job: tuple) -> tuple:
     """Wrapper for monomer and multimer comparison for multiprocessing.
 
     Args:
@@ -288,6 +410,32 @@ def _wrapper_do_monomer_and_multimer_comparision(job: tuple):
         permutation_number,
         i,
         j,
+    )
+
+
+def _wrapper_compare_best_seed_permutations(job: tuple) -> tuple:
+    """Wrapper used by multiprocessing to compare best seeds across permutations.
+
+    Args:
+        job (tuple): Job tuple containing indices, file paths, and metadata.
+
+    Returns:
+        tuple: Results including scores and metadata.
+    """
+    perm_i, perm_j, file_i_path, file_j_path, n_chain, protein_id = job
+
+    dockq, tm, iptm_prod = do_monomer_and_multimer_comparision(
+        (file_i_path, file_j_path)
+    )
+
+    return (
+        dockq,
+        tm,
+        iptm_prod,
+        n_chain,
+        protein_id,
+        perm_i,
+        perm_j,
     )
 
 
