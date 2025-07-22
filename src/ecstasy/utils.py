@@ -129,13 +129,16 @@ def tm_score(
     Returns:
         float: The TM-score between the two structures.
     """
-    superimposed, _, ref_indices, sub_indices = (
-        structure.superimpose_structural_homologs(
-            ref_structure, sub_structure, max_iterations=5
+    try:
+        superimposed, _, ref_indices, sub_indices = (
+            structure.superimpose_structural_homologs(
+                ref_structure, sub_structure, max_iterations=5
+            )
         )
-    )
-    return structure.tm_score(ref_structure, superimposed, ref_indices, sub_indices)
-
+        return structure.tm_score(ref_structure, superimposed, ref_indices, sub_indices)
+    except ValueError:
+        print(f"Error calculating TM-score! Returning 0.")
+        return 0
 
 def generate_tm_confusion_matrix(
     proteins, figsize=(10, 8), show_plot=True, return_matrix=False
