@@ -1,11 +1,14 @@
 # Standardized imports
 import json
+from typing import Optional
 from typing_extensions import deprecated
 import warnings
 from collections import defaultdict
 from multiprocessing import Pool
 from pathlib import Path
 from math import inf
+import re
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -257,6 +260,7 @@ class AnalyzePermutations:
         output_dir: str,
         *,
         relaxed: bool = True,
+        esmfold_logs_filepath: Optional[str] = None,
     ):
         self.predictions_dir = predictions_dir
 
@@ -269,6 +273,51 @@ class AnalyzePermutations:
         self.output_dir = output_dir
         self.relaxed = relaxed
 
+        if model_name == "esmfold":
+            assert (
+                esmfold_logs_filepath is not None
+            ), "ESMFold logs file path is required."
+            assert Path(
+                esmfold_logs_filepath
+            ).is_file(), "ESMFold logs file does not exist."
+            esmfold_logs_path = Path(esmfold_logs_filepath)
+            self.esmfold_confidence_scores = self.parse_esmfold_logs(esmfold_logs_path)
+
+    @staticmethod
+    def parse_esmfold_logs(log_path: str) -> dict:
+        """
+        Parses an esmfold log file to extract pLDDT and pTM scores into a nested dict.
+
+        Args:
+            log_path (str): Path to the esmfold.txt log file.
+
+        Returns:
+            dict: Nested dictionary {n_chains: {protein_id: {permutation: {"plddt": float, "ptm": float}}}}
+        """
+        # Nested dict: n_chains -> protein_id -> permutation -> scores
+        result = defaultdict(lambda: defaultdict(dict))
+
+        # Regex to match prediction lines
+        pattern = re.compile(
+            r"Predicted structure for n(\d+)_(\w+)_p(\d+) with length \d+, pLDDT ([\d.]+), pTM ([\d.]+)"
+        )
+
+        with open(log_path, "r") as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    n_chains = int(match.group(1))
+                    protein_id = match.group(2)
+                    permutation = int(match.group(3))
+                    plddt = float(match.group(4))
+                    ptm = float(match.group(5))
+                    result[n_chains][protein_id][permutation] = {
+                        "plddt": plddt,
+                        "ptm": ptm,
+                    }
+
+        return dict(result)
+
     def organize_esmfold_predictions(self) -> dict:
         """Organizes PDB files by protein ID and chain count.
 
@@ -276,7 +325,7 @@ class AnalyzePermutations:
             dict: {n_chains: {protein_id: [file_paths]}}
         """
         pdb_path = Path(self.predictions_dir)
-        organized_files = defaultdict(lambda: defaultdict(list))
+        organized_files = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
         # Find all PDB files
         pdb_files = list(pdb_path.glob("*.pdb"))
@@ -291,16 +340,14 @@ class AnalyzePermutations:
                 try:
                     n_chains = int(parts[0][1:])  # Extract number after 'n'
                     protein_id = parts[1]
+                    permutation = int(parts[2][1:])
 
-                    organized_files[n_chains][protein_id].append(str(pdb_file))
+                    organized_files[n_chains][protein_id][permutation].append(
+                        str(pdb_file)
+                    )
                 except ValueError:
                     print(f"Could not parse filename: {filename}")
                     continue
-
-        # Sort file paths for each protein
-        for n_chains in organized_files:
-            for protein_id in organized_files[n_chains]:
-                organized_files[n_chains][protein_id].sort()
 
         return dict(organized_files)
 
@@ -423,8 +470,15 @@ class AnalyzePermutations:
                 conf_path = utils.get_confidence_file_path_colabfold(file_path)
                 with open(conf_path, "r") as f:
                     iptm_val = json.load(f)["iptm"]
+            # Using pTM scores as iPTM is not available for ESMFold
             elif self.model_name == "esmfold":
-                raise ValueError(f"ESMFold not supported yet.")
+                filename_contents = Path(file_path).stem.split("_")
+                n_chains = int(filename_contents[0][1:])
+                pdb_id = filename_contents[1]
+                permutation = int(filename_contents[2][1:])
+                iptm_val = self.esmfold_confidence_scores[n_chains][pdb_id][
+                    permutation
+                ]["ptm"]
             return iptm_val
         except (FileNotFoundError, KeyError, json.JSONDecodeError):
             # Skip files with missing/invalid confidence JSON
