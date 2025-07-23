@@ -12,7 +12,7 @@ import pandas as pd
 
 from ecstasy import utils
 
-SRC_DIR = Path(__file__).parent.parent.parent
+BASE_DIR = Path(__file__).parent.parent.parent.parent
 
 
 class ChainPermutationGenerator:
@@ -37,7 +37,7 @@ class ChainPermutationGenerator:
             self.pdb_features = json.load(f)
 
         # Load SAbDab database
-        with open(SRC_DIR / "resources/sabdab_summary_all.tsv", "r") as f:
+        with open(BASE_DIR / "resources/sabdab_summary_all.tsv", "r") as f:
             self.sabdab_db = pd.read_csv(f, sep="\t")
 
     def _filter_unique_chain_lengths(self, protein: dict) -> bool:
