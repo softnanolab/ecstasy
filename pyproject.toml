@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecstasy"
+version = "0.1.0"
+description = "A comprehensive protein structure prediction and analysis toolkit"
+authors = [
+    {name = "Harsh Agrawal", email = "harshagrawal.1312@gmail.com"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+
+dependencies = [
+    "biopython>=1.85",
+    "biotite>=1.3.0",
+    "numpy>=2.3.0",
+    "pandas>=2.3.0",
+    "psutil>=7.0.0",
+    "requests>=2.32.4",
+    "seaborn>=0.13.2",
+    "tmtools>=0.2.0",
+    "jupyter>=1.1.1",
+    "pytest>=8.4.1",
+    "black>=25.1.0",
+    "DockQ",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.1",
+    "black>=25.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"ecstasy" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.txt", "*.md"] 
