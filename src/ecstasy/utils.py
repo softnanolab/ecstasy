@@ -3,6 +3,8 @@ import os
 import shutil
 from pathlib import Path
 from typing import Dict
+import json
+from glob import glob
 
 import biotite.structure as structure
 import biotite.structure.io as io
@@ -631,3 +633,41 @@ def clean_up_colabfold_predictions(predictions_dir: str):
     print(
         f"Moved {moved_items} items into organised sub-folders inside {predictions_path}."
     )
+
+
+def find_max_protein_iptm_boltz(
+    folder_path: str,
+) -> tuple[str, float] | tuple[None, None]:
+    """
+    Finds the confidence_*.json file in the given folder with the highest 'protein_iptm' value.
+
+    Args:
+        folder_path (str): Path to the folder containing confidence_*.json files.
+
+    Returns:
+        tuple: (filename, protein_iptm) of the file with the highest protein_iptm, or (None, None) if not found.
+    """
+
+    confidence_files = glob(os.path.join(folder_path, "confidence_*.json"))
+
+    max_iptm = float("-inf")
+    max_file = None
+    max_score = None
+
+    for file_path in confidence_files:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+            iptm = data.get("protein_iptm", None)
+            if iptm is not None and iptm > max_iptm:
+                max_iptm = iptm
+                max_file = file_path
+                max_score = iptm
+
+    if max_file is not None:
+        print(
+            f"File with highest protein_iptm: {os.path.basename(max_file)} (protein_iptm={max_score})"
+        )
+        return os.path.basename(max_file), max_score
+    else:
+        print("No confidence_*.json files with 'protein_iptm' found.")
+        return None, None
