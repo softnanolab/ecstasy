@@ -563,7 +563,7 @@ def clean_up_colabfold_predictions(predictions_dir: str):
         n4_4YTP_p12_unrelaxed_rank_001_model_1_scores.json
 
     All files (or directories) that share the *prediction key* – the part of the
-    name that matches the regular expression ``n\d+_[A-Za-z0-9]+_p\d+`` – belong
+    name that matches the regular expression ``n\\d+_[A-Za-z0-9]+_p\\d+`` – belong
     to the same prediction.  This helper collects every such item and moves it
     into a dedicated sub-folder with that key as its name, giving a much
     cleaner directory structure::
