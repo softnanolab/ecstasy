@@ -91,6 +91,11 @@ def _glob_sample_cifs(predictions_dir: Path, expected_count: int) -> list[Path]:
 
 
 def parse_one(cfg: BenchmarkConfig, entry: dict) -> Path:
+    out_path = cfg.run_dir / "boltz_contacts" / f"{entry['id']}.npz"
+    flag_path = out_path.with_suffix(".completed")
+    if flag_path.exists() and out_path.exists():
+        return out_path
+
     pred_dir = cfg.run_dir / "boltz_predictions" / entry["id"]
     cif_paths = _glob_sample_cifs(pred_dir, expected_count=cfg.diffusion_samples)
 
@@ -104,7 +109,6 @@ def parse_one(cfg: BenchmarkConfig, entry: dict) -> Path:
         [np.full(len(seq), i, dtype=np.int64) for i, seq in enumerate(entry["sequences"])]
     )
 
-    out_path = cfg.run_dir / "boltz_contacts" / f"{entry['id']}.npz"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         out_path,
@@ -112,8 +116,18 @@ def parse_one(cfg: BenchmarkConfig, entry: dict) -> Path:
         chain_ids=chain_ids,
         n_samples=np.int64(distances.shape[0]),
     )
+    # Sentinel written last so a crashed/half-written npz never looks "done".
+    flag_path.touch()
     return out_path
 
 
 def parse_all(cfg: BenchmarkConfig) -> list[Path]:
-    return [parse_one(cfg, e) for e in load_manifest(cfg)]
+    paths: list[Path] = []
+    for entry in load_manifest(cfg):
+        out_path = cfg.run_dir / "boltz_contacts" / f"{entry['id']}.npz"
+        if out_path.with_suffix(".completed").exists() and out_path.exists():
+            print(f"[parse] skip {entry['id']}: .completed flag present")
+            paths.append(out_path)
+            continue
+        paths.append(parse_one(cfg, entry))
+    return paths

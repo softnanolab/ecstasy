@@ -1,0 +1,31 @@
+# cx3 pilot config — 1 protein, single PBS job, 20 diffusion samples.
+
+run_name: pilot_1protein
+
+# MINT processed parquet + data root — TODO: set once dataset is copied to cx3.
+split_parquet: /rds/general/user/ha1822/ephemeral/MINT_DATA/pdb/processed/splits/seq_id_30/index.parquet
+mint_data_root: /rds/general/user/ha1822/ephemeral/MINT_DATA
+
+# Pilot stays tight to limit walltime.
+n_proteins: 1
+seed: 42
+length_filter:
+  min_total: 100
+  max_total: 400
+
+model: boltz2
+diffusion_samples: 20
+contact_threshold_angstrom: 8.0
+intra_min_sep: 24
+
+# cx3 PBS — v1_gpu72 confirmed available; no v1_a100 on this cluster.
+pbs:
+  queue: v1_gpu72
+  walltime: "04:00:00"
+  ncpus: 8
+  mem_gb: 64
+  ngpus: 1
+  max_queued: 50
+
+boltz_env: /rds/general/user/ha1822/home/code/nanolab/ecstasy/envs/boltz
+conda_base: /rds/general/user/ha1822/home/anaconda3
