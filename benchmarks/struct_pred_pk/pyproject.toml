@@ -1,0 +1,38 @@
+[project]
+name = "struct-pred-benchmarking"
+version = "0.0.1"
+description = "P@K contact-prediction benchmark: MINT vs Boltz-2 (and other structure-prediction models)"
+requires-python = ">=3.12"
+dependencies = [
+    "biotite>=0.40.0",
+    "numpy>=1.26",
+    "pyarrow>=15.0",
+    "pyyaml>=6.0",
+    "scipy>=1.11",
+    "torch>=2.1.0",
+    "tqdm>=4.66",
+    "mint",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+# Default `mint` source assumes MINT is cloned as a sibling of the ecstasy
+# repo (i.e. <parent>/mint and <parent>/ecstasy). Override at install time
+# by editing this path or supplying your own [tool.uv.sources] in a workspace.
+[tool.uv.sources]
+mint = { path = "../../../mint", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/struct_pred_benchmarking"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/struct_pred_benchmarking/hpc/templates" = "struct_pred_benchmarking/hpc/templates"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

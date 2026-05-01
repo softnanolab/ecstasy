@@ -1,0 +1,33 @@
+# cx3 pilot config — 1 protein, single PBS job, 20 diffusion samples.
+# Edit the four absolute paths below to match the cx3 layout.
+
+run_name: pilot_1protein_cx3
+
+# MINT processed parquet + data root (these come from MINT's data prep pipeline).
+split_parquet: /CHANGE_ME/MINT_DATA/pdb/processed/splits/seq_id_30/index.parquet
+mint_data_root: /CHANGE_ME/MINT_DATA
+
+# Pilot stays tight to limit walltime.
+n_proteins: 1
+seed: 42
+length_filter:
+  min_total: 100
+  max_total: 400
+
+model: boltz2
+diffusion_samples: 20
+contact_threshold_angstrom: 8.0
+intra_min_sep: 24
+
+# cx3 PBS — adjust queue/walltime/resources to your local conventions.
+pbs:
+  queue: v1_a100
+  walltime: "04:00:00"
+  ncpus: 8
+  mem_gb: 64
+  ngpus: 1
+  max_queued: 50
+
+# These two get installed by ecstasy/scripts/install/boltz.sh + your conda install.
+boltz_env: /CHANGE_ME/ecstasy/envs/boltz
+conda_base: /CHANGE_ME/miniconda3

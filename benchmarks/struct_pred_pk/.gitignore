@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+
+# per-run artefacts (large, regenerable)
+runs/
+
+# editor
+.vscode/
+.idea/

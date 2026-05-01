@@ -1,0 +1,23 @@
+#!/bin/bash
+#PBS -N boltz_{id}
+#PBS -q {queue}
+#PBS -l select=1:ncpus={ncpus}:mem={mem_gb}gb:ngpus={ngpus}
+#PBS -l walltime={walltime}
+#PBS -o {run_dir}/logs/boltz_{id}.out
+#PBS -e {run_dir}/logs/boltz_{id}.err
+
+set -euo pipefail
+
+cd "{repo_root}"
+mkdir -p "{run_dir}/boltz_predictions/{id}"
+
+source "{conda_base}/etc/profile.d/conda.sh"
+conda activate "{boltz_env}"
+
+boltz predict "{run_dir}/inputs/{id}.yaml" \
+    --use_msa_server \
+    --diffusion_samples {diffusion_samples} \
+    --seed {seed} \
+    --out_dir "{run_dir}/boltz_predictions/{id}" \
+    --output_format mmcif \
+    --devices 1 --accelerator gpu
