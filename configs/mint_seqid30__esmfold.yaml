@@ -1,0 +1,15 @@
+# Ecstasy benchmark config: ESMFold on MINT seq_id_30 val (interchain P@K).
+#
+# ESMFold is single-sequence — no MSA needed. Chains are joined with a 25-residue
+# poly-glycine linker; the runner softmaxes the trunk distogram, sums bins 0..18
+# (≈ Cβ < 8 Å), and trims linker positions to recover an (L, L) over residues only.
+benchmark: mint_seqid30
+model: esmfold
+data_root: /projects/u6jv/boltz_benchmarking/DATA
+
+model_config:
+  env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-esmfold
+  num_recycles: 4
+  chain_linker_length: 25
+  contact_cutoff_bin: 19      # ESMFold linspace(2.3125, 21.6875, 63)² bin edges; bin 19 ≈ 8 Å
+  chunk_size: 64              # reduces axial-attention memory; safe default

@@ -1,0 +1,16 @@
+# Ecstasy benchmark config: MSA Pairformer on MINT seq_id_30 val.
+#
+# For real with-MSA numbers, generate complex a3ms via softnanolab/colabfold-local
+# (the ColabFold MSA-search pipeline tuned for ISAMBARD GH200) and point
+# `complex_a3m_dir` at the output directory. Without it, the runner falls back
+# to a single-sequence a3m (degenerate baseline).
+benchmark: mint_seqid30
+model: msa_pairformer
+data_root: /projects/u6jv/boltz_benchmarking/DATA
+
+model_config:
+  env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-esmfold
+  max_msa_depth: 512
+  # complex_a3m_dir: /path/to/colabfold-local/output/  # uncomment when MSAs available
+  # weights_dir: /path/to/local/msa_pairformer/weights  # else downloaded from HF
+  # hhfilter_bin: /home/u6jv/harsh.u6jv/colabfold-local/tools/hhsuite/bin/hhfilter

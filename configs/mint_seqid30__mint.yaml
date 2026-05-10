@@ -1,0 +1,21 @@
+# Ecstasy benchmark config: MINT (single-sequence) on MINT seq_id_30 val.
+#
+# MINT is *our* model. Different experiment runs have different (config, weights)
+# pairs, so the runtime values are not baked in here — pass them on the CLI:
+#
+#   ecstasy bench predict --config configs/mint_seqid30__mint.yaml \
+#       --model_config /path/to/<experiment>.yaml \
+#       --model_weights /path/to/<experiment>.ckpt
+#
+# These flags land under cfg["model_config"]["model_config_path"] and
+# cfg["model_config"]["model_weights_path"] which the mint runner reads.
+benchmark: mint_seqid30
+model: mint
+data_root: /projects/u6jv/boltz_benchmarking/DATA
+
+model_config:
+  # Reuse the venv that already has mint installed; replace with envs/mint
+  # once scripts/install/mint.sh lands.
+  env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-boltz
+  contact_threshold_bin: 5      # bins 0..4 = Cβ < 8 Å; matches MINT GT convention
+  # predict_limit: 1            # uncomment for the smoke test
