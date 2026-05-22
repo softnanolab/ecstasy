@@ -26,8 +26,6 @@ python scripts/build_ecstasy_v1/04_run_foldseek.py \
 python scripts/build_ecstasy_v1/05_compute_interface_edges.py \
     2>&1 | tee /projects/u6jv/ecstasy/benchmarks/ecstasy_v1/05_compute_edges.log
 
-python scripts/build_ecstasy_v1/06_deleak_report.py \
-    2>&1 | tee /projects/u6jv/ecstasy/benchmarks/ecstasy_v1/06_deleak_report.log
 
 echo "----"
 echo "Done: $(date)"
