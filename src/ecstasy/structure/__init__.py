@@ -1,8 +1,23 @@
-"""Shared utilities for the ecstasy_v1 leakage-analysis pipeline.
+"""Structural-biology primitives shared across ecstasy benchmarks.
 
-Pinder-style interface enumeration: download bio-assembly 1, find all chain
-pairs with any backbone-atom (N, CA, C, O) min-distance <= 10 A, compute
-interface residue sets, and dump per-chain PDB files for Foldseek.
+Pinder-style interface enumeration: download bio-assembly 1 from RCSB,
+parse to a single-model `AtomArray`, split into per-chain views, find
+all chain pairs with any backbone-atom (N, CA, C, O) min-distance ≤ 10 Å,
+and dump per-chain PDB files (used by Foldseek + downstream model runners).
+
+Public API:
+    download_cif_assembly(pdb_id, assembly_id=1) -> bytes
+    parse_cif_bytes(cif_bytes) -> AtomArray
+    load_local_cif(path) -> AtomArray
+    split_into_chains(atoms) -> list[ChainView]
+    interface_residue_indices(chain_a, chain_b, cutoff=10.0)
+        -> (a_res_idx, b_res_idx, n_contact_pairs)
+    enumerate_dimer_pairs(chains) -> list[(i, j)]
+    write_chain_pdb(chain_atoms, out_path)
+    select_chain_atoms(atoms, chain_id) -> AtomArray
+    ChainView                          -- (chain_id, res_ids, sequence,
+                                          backbone_xyz, backbone_res_idx)
+    BACKBONE_ATOMS, INTERFACE_CUTOFF_A
 """
 
 from __future__ import annotations
