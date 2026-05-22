@@ -41,7 +41,7 @@ from MSA_Pairformer.dataset import MSA, aa2tok_d, prepare_msa_masks  # noqa: E40
 from MSA_Pairformer.model import MSAPairformer  # noqa: E402
 
 MASTER_INDEX = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/master/index.parquet")
-MSAS_DIR = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/msas")
+DEFAULT_MSAS_DIR = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/msas")
 PRED_ROOT = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/predictions/msa_pairformer")
 WEIGHTS_DIR = Path("/projects/u6jv/ecstasy/weights/msa_pairformer")
 HHFILTER_BIN = "/home/u6jv/harsh.u6jv/ecstasy/tools/hhsuite/bin/hhfilter"
@@ -128,12 +128,23 @@ def predict_one(model, device, entry_id: str, seqs: list[str], a3m_path: Path, o
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-id", default="run0", help="output sub-dir name under predictions/")
+    ap.add_argument(
+        "--msas-dir",
+        type=Path,
+        default=DEFAULT_MSAS_DIR,
+        help=(
+            "Directory of paired A3Ms keyed by <entry_id>.a3m. Default is the unfiltered "
+            "msas/ dir; pass msas_filtered/ to run the notebook-save_msa-filtered variant."
+        ),
+    )
     ap.add_argument("--limit", type=int, default=None, help="run only first N entries (smoke)")
     ap.add_argument("--ids", nargs="*", default=None, help="run only these entry ids")
     args = ap.parse_args()
 
+    msas_dir: Path = args.msas_dir
     out_run_root = PRED_ROOT / args.run_id
     out_run_root.mkdir(parents=True, exist_ok=True)
+    print(f"msas dir: {msas_dir}")
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
@@ -158,7 +169,7 @@ def main() -> int:
 
     log: list[dict] = []
     for i, row in enumerate(manifest.itertuples(), 1):
-        a3m = MSAS_DIR / f"{row.id}.a3m"
+        a3m = msas_dir / f"{row.id}.a3m"
         if not a3m.exists():
             log.append({"id": row.id, "status": "missing_msa", "L": None, "depth_used": None, "wall_s": 0.0})
             print(f"  [{i}/{len(manifest)}]  {row.id}  MISSING A3M", flush=True)

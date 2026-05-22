@@ -33,7 +33,7 @@ scheduler (SLURM, Kubernetes, local cron, …) as appropriate.
 |---|---|
 | 6. Fetch paired MSAs from `api.colabfold.com/ticket/pair` | `08_fetch_msas_colabfold.py` |
 | 7. (Optional) Apply notebook `save_msa` filters (cov=75, qid=15, Δgene=1) | `11_apply_notebook_filters.py` |
-| 8. Run MSA Pairformer inference (notebook-faithful) | `09_run_msa_pairformer.py` (raw MSAs) or `09b_run_msa_pairformer_filtered.py` (filtered MSAs) |
+| 8. Run MSA Pairformer inference (notebook-faithful) | `09_run_msa_pairformer.py` (raw MSAs by default; pass `--msas-dir .../msas_filtered` for the notebook-`save_msa`-filtered variant) |
 | 9. Score interchain P@K (Cb + ConFind heads) | `10_score_msa_pairformer.py` |
 
 
