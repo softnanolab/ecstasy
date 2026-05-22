@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ecstasy"
 version = "0.1.0"
-description = "A comprehensive protein structure prediction and analysis toolkit"
+description = "Benchmarking toolkit for protein interchain-contact prediction models"
 authors = [
     {name = "Harsh Agrawal", email = "harshagrawal.1312@gmail.com"}
 ]
@@ -14,22 +14,13 @@ license = {text = "MIT"}
 requires-python = ">=3.9"
 
 dependencies = [
-    "biopython",
     "biotite",
+    "fire",
     "numpy",
     "pandas",
     "pyarrow",
-    "psutil",
-    "requests",
-    "seaborn",
-    "tmtools",
-    "jupyter",
-    "pytest",
-    "black",
-    "DockQ",
-    "tqdm",
-    "fire",
     "pyyaml",
+    "requests",
 ]
 
 [project.scripts]
