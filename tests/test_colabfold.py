@@ -42,10 +42,20 @@ class TestChainParser:
         assert entries[1].is_query is False
 
     def test_inserts_are_stripped(self):
+        # In A3M, lowercase letters and '.' mark *insertions* relative to
+        # the matched alignment; uppercase letters and '-' are matched
+        # positions. ACDef.GH -> drop e, f, . -> ACDGH (the uppercase 'D'
+        # is a matched residue, not an insertion).
         text = ">query\nACDef.GH\n"
         entries = parse_chain_a3m_chunk(text)
-        # lowercase + dots are insertions, stripped
-        assert entries[0].sequence == "ACGH"
+        assert entries[0].sequence == "ACDGH"
+
+    def test_inserts_with_gaps_preserve_gaps(self):
+        # Gap '-' is a matched position (alignment gap), not an insertion;
+        # it must survive the strip.
+        text = ">query\nAC-Defg-H\n"
+        entries = parse_chain_a3m_chunk(text)
+        assert entries[0].sequence == "AC-D-H"
 
     def test_metadata_filled_when_requested(self):
         # Real colabfold-style header:
