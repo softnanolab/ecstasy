@@ -33,7 +33,12 @@ class MintSeqid30Bench(Benchmark):
         import torch
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
-        contact_map = (sample.contact_map.numpy() < self.contact_threshold_bin)
+        # MINT marks unresolved Cβ positions with bin = -1; those must NOT be
+        # counted as contacts. Without the `>= 0` guard, `-1 < threshold` is
+        # True and K gets inflated → P@K is systematically wrong for entries
+        # with missing residues.
+        raw = sample.contact_map.numpy()
+        contact_map = (raw >= 0) & (raw < self.contact_threshold_bin)
         sequences = list(sample.sequences)
         return {"contact_map": contact_map, "sequences": sequences}
 

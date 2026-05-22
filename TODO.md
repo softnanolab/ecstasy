@@ -134,16 +134,14 @@ When these are written and tested, change every config's `env_path:` from
 CPU JAX works (`JAX_PLATFORMS=cpu` in the sbatch). Diagnostic job log:
 `/projects/u6jv/boltz_benchmarking/DATA/ecstasy/smoke_colabfold/logs/ecstasy_smoke_colabfold_4533246.out`.
 
-### Mint contact-threshold edge case
+### ~~Mint contact-threshold edge case~~  (fixed)
 
-`benchmarks/mint_seqid30.py:gt_for` does `contact_map < 5`, which incorrectly
-counts `-1` padding entries (returned by MINT's processing for missing
-residues) as contacts. The 10jy validation was clean (no `-1`s in that entry)
-so the bug didn't surface, but for the full val run change to:
-
-```python
-contact_map = (sample.contact_map.numpy() >= 0) & (sample.contact_map.numpy() < self.contact_threshold_bin)
-```
+Previously `benchmarks/mint_seqid30.py:gt_for` did `contact_map < 5`, which
+incorrectly counted `-1` padding entries (returned by MINT's processing for
+missing residues) as contacts. Fixed: gt_for now masks with
+`(raw >= 0) & (raw < self.contact_threshold_bin)`. Any prior P@K numbers
+computed on entries with missing residues were systematically inflated and
+should be regenerated.
 
 ### MINT AUC name mismatch
 

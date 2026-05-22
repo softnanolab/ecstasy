@@ -23,6 +23,7 @@ directory via `complex_a3m_dir`.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -134,7 +135,14 @@ def main():
     model = MSAPairformer.from_pretrained(device=device, weights_dir=weights_dir)
     model.eval()
 
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+    # autocast is CUDA-only here; on the CPU fallback path use a no-op context
+    # so the runner still produces contact.npz without raising on CPU nodes.
+    autocast_ctx = (
+        torch.autocast("cuda", dtype=torch.bfloat16)
+        if device.type == "cuda"
+        else contextlib.nullcontext()
+    )
+    with torch.no_grad(), autocast_ctx:
         res = model.predict_cb_contacts(
             msa=msa_onehot,
             mask=mask.to(device),
