@@ -92,6 +92,78 @@ def main() -> int:
     print(f"wrote {RESULTS / 'comparison.md'}")
     for line in lines:
         print(line)
+
+    # === 4-panel comparison figure ===
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    colors = plt.cm.tab10.colors
+
+    # (a) histogram of P@K per run
+    ax = axes[0, 0]
+    for (run_id, label, metric, df), c in zip(available, colors):
+        s = df[metric].dropna().values
+        ax.hist(s, bins=np.linspace(0, max(s.max() * 1.05, 0.4), 25), histtype="step",
+                linewidth=1.6, color=c, label=run_id)
+    ax.set_xlabel("P@K")
+    ax.set_ylabel("# entries")
+    ax.set_title("P@K distribution across runs")
+    ax.legend(fontsize=8, loc="upper right")
+
+    # (b) CDF of P@K
+    ax = axes[0, 1]
+    for (run_id, label, metric, df), c in zip(available, colors):
+        s = np.sort(df[metric].dropna().values)
+        cdf = np.arange(1, len(s) + 1) / max(len(s), 1)
+        ax.plot(s, cdf, drawstyle="steps-post", color=c, label=run_id)
+    ax.set_xlabel("P@K")
+    ax.set_ylabel("CDF over entries")
+    ax.set_title("P@K CDF (rightward = better)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, loc="lower right")
+
+    # (c) per-entry scatter: best Cb run vs best ConFind run
+    ax = axes[1, 0]
+    cb_runs = [(rid, lbl, m, df) for rid, lbl, m, df in available if m == "P@K"]
+    cf_runs = [(rid, lbl, m, df) for rid, lbl, m, df in available if m == "P@K_confind"]
+    if cb_runs and cf_runs:
+        cb = max(cb_runs, key=lambda x: x[3][x[2]].dropna().mean())
+        cf = max(cf_runs, key=lambda x: x[3][x[2]].dropna().mean())
+        merged = cb[3][["id", cb[2]]].merge(
+            cf[3][["id", cf[2]]], on="id", how="inner", suffixes=("_cb", "_cf")
+        )
+        ax.scatter(merged[cb[2]], merged[cf[2]], s=12, alpha=0.6)
+        m_max = max(merged[cb[2]].max(), merged[cf[2]].max(), 0.4)
+        ax.plot([0, m_max], [0, m_max], "k--", linewidth=0.8, alpha=0.5)
+        ax.set_xlabel(f"P@K  ({cb[0]})")
+        ax.set_ylabel(f"P@K_confind  ({cf[0]})")
+        ax.set_title(f"Per-entry: {cb[0]} vs {cf[0]}")
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.set_visible(False)
+
+    # (d) bar chart of headline aggregates
+    ax = axes[1, 1]
+    labels = [s["run_id"] for s in summaries]
+    means = [s["mean"] for s in summaries]
+    medians = [s["median"] for s in summaries]
+    x = np.arange(len(labels))
+    ax.bar(x - 0.2, means, 0.4, label="mean P@K")
+    ax.bar(x + 0.2, medians, 0.4, label="median P@K")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+    ax.set_ylabel("P@K")
+    ax.set_title("Headline aggregates per run")
+    ax.legend(fontsize=8)
+    ax.grid(True, axis="y", alpha=0.3)
+
+    fig.suptitle(
+        f"MSA Pairformer on ecstasy_v1 — {len(summaries)} runs side-by-side",
+        fontsize=13, fontweight="bold",
+    )
+    fig.tight_layout()
+    out_png = RESULTS / "comparison.png"
+    fig.savefig(out_png, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out_png}")
     return 0
 
 

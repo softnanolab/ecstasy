@@ -27,7 +27,7 @@ import torch
 from biotite.structure import AtomArray
 from biotite.structure.io.pdb import PDBFile
 
-sys.path.insert(0, "/home/u6jv/harsh.u6jv/ecstasy/scripts/build_ecstasy_v1")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import _AA3to1  # noqa: E402
 
 ROOT = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1")
