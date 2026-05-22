@@ -58,8 +58,9 @@ when set). For the inline path, predict will iterate entries serially in one
 sbatch job. Either run as one big sbatch per (benchmark, model) or implement
 job-array fan-out under `pipelines.contact_prediction.run_predict`.
 
-Suggested batch sbatch templates live under `scripts/sbatch/smoke_*.sbatch`;
-copy and remove `predict_limit` from the smoke config to run the full set.
+(Cluster-specific SLURM smoke wrappers used to live under `scripts/sbatch/`; they
+were removed in PR cleanup. Wrap each `ecstasy bench` command in your own
+scheduler.)
 
 Expected wallclock per entry (286-residue dimer reference, GH200):
 - boltz2 with-MSA: 30–60 s (already validated across 1,511 entries)
@@ -116,7 +117,7 @@ reproducible recipe for rebuilding them from scratch:
   `./envs/boltz/` (a new conda env, separate from the existing `.venv-boltz`).
 - `scripts/install/mint.sh` (NEW) — Python 3.12 + cu124 torch + `pip install -e modules/mint`
 - `scripts/install/esmfold.sh` (exists, x86_64) — rewrite per the
-  install recipe in the existing `scripts/sbatch/install_openfold.sbatch`
+  install recipe documented in PR #N (or your scheduler's equivalent)
   (gcc-native/13.2, CUDA 12.6, --no-build-isolation, dllogger stub, biopython
   patches). All steps proven working in the smoke validation.
 - `scripts/install/msa_pairformer.sh` (NEW) — Python 3.12 venv + `pip install -e modules/msa_pairformer`
@@ -249,14 +250,12 @@ source ./envs/.venv-esmfold/bin/activate            # ecstasy CLI lives here
 ecstasy bench list                                  # current registries
 ecstasy bench compare --task mint_seqid30           # latest aggregated table
 
-# To re-run a smoke for any model:
-ls scripts/sbatch/smoke_*_e2e.sbatch
-sbatch scripts/sbatch/smoke_esmfold_e2e.sbatch     # for example
-squeue -u $USER
+# To re-run a smoke for any model — wrap in your scheduler. The actual command is:
+ecstasy bench predict --config configs/mint_seqid30__<model>_smoke.yaml --submit
+ecstasy bench score   --config configs/mint_seqid30__<model>_smoke.yaml
 
 # To kick off the real predict for a model:
-# (1) drop predict_limit from configs/mint_seqid30__<model>.yaml
-# (2) cp scripts/sbatch/smoke_<model>_e2e.sbatch scripts/sbatch/run_<model>.sbatch
-# (3) increase --time and remove the smoke config reference; point at the full config
-# (4) sbatch scripts/sbatch/run_<model>.sbatch
+# (1) drop predict_limit from configs/mint_seqid30__<model>.yaml (or use the non-smoke variant)
+# (2) ecstasy bench predict --config configs/mint_seqid30__<model>.yaml --submit
+# (3) ecstasy bench score   --config configs/mint_seqid30__<model>.yaml
 ```
