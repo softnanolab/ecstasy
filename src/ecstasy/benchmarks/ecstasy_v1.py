@@ -19,6 +19,7 @@ from typing import Iterable
 import numpy as np
 
 from ecstasy.benchmarks.base import Benchmark, Entry, register_benchmark
+from ecstasy.metrics.contact import pak_inter_chain_rect
 
 
 @register_benchmark
@@ -71,40 +72,4 @@ class EcstasyV1Bench(Benchmark):
         probs_ba = probs_full[la:la + lb, :la].T
         probs_inter = 0.5 * (probs_ab + probs_ba)
 
-        return _pak_from_rect(probs_inter, contact_gt_rect)
-
-
-def _pak_from_rect(
-    probs: np.ndarray, gt: np.ndarray
-) -> dict[str, float]:
-    """Pinder/MINT-style P@K on a rectangular (Na, Nb) interchain matrix.
-
-    K = number of true interchain contacts in the whole rectangle (no triu
-    needed since the two chains are distinct). Then sort predicted probabilities
-    descending, take top-K_eff, compute cumulative precision.
-
-    AUC is the mean-precision over top-K_eff (matches MINT's metric naming).
-    """
-    probs_flat = probs.flatten().astype(np.float64)
-    gt_flat = gt.flatten().astype(bool)
-    K = int(gt_flat.sum())
-    if K == 0 or probs_flat.size == 0:
-        return {"AUC": float("nan"), "P@K": float("nan"), "P@K/2": float("nan"), "P@K/5": float("nan"), "K": K}
-
-    K_eff = max(1, min(K, probs_flat.size))
-    order = np.argsort(-probs_flat, kind="stable")[:K_eff]
-    sorted_truth = gt_flat[order].astype(np.float64)
-    cum = np.cumsum(sorted_truth)
-    arange = np.arange(1, K_eff + 1)
-
-    idx_K5 = max(int(0.2 * K_eff) - 1, 0)
-    idx_K2 = max(int(0.5 * K_eff) - 1, 0)
-    idx_K = K_eff - 1
-
-    return {
-        "AUC": float((cum / arange).mean()),
-        "P@K": float(cum[idx_K] / (idx_K + 1)),
-        "P@K/2": float(cum[idx_K2] / (idx_K2 + 1)),
-        "P@K/5": float(cum[idx_K5] / (idx_K5 + 1)),
-        "K": K,
-    }
+        return pak_inter_chain_rect(probs_inter, contact_gt_rect)
