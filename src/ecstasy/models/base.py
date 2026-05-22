@@ -2,38 +2,37 @@ from __future__ import annotations
 
 import json
 import subprocess
-from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
 
 from ecstasy.benchmarks.base import Entry
 
 
-class ModelAdapter(ABC):
-    name: ClassVar[str]
-    needs_msa: ClassVar[bool]
-    runner_script: ClassVar[Path | None] = None
+class ModelAdapter:
+    """Subprocess-bridge to a model runner living in its own venv.
 
-    def __init__(self, config: dict):
+    Each registered model has a `<name>_runner.py` script under `_runners/`
+    that reads a JSON bundle on stdin and writes `<out_dir>/contact.npz`.
+    This adapter just packs the bundle and spawns the runner in `env_path`.
+    """
+
+    def __init__(self, *, name: str, needs_msa: bool, runner_script: Path, config: dict):
+        self.name = name
+        self.needs_msa = needs_msa
+        self.runner_script = runner_script
         self.config = config
         env_path = config.get("env_path") or config.get("model_config", {}).get("env_path")
-        self.env_path = Path(env_path) if env_path else None
+        if not env_path:
+            raise ValueError(
+                f"{name}: env_path required (top-level or under model_config)"
+            )
+        self.env_path = Path(env_path)
 
-    def predict_one(self, entry: Entry, msa_paths: dict[str, Path] | None, out_dir: Path) -> Path:
+    def predict_one(
+        self, entry: Entry, msa_paths: dict[str, Path] | None, out_dir: Path
+    ) -> Path:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        bundle = self._build_bundle(entry, msa_paths, out_dir)
-        if self.env_path is None:
-            self._run_in_host(bundle)
-        else:
-            self._run_in_env(bundle)
-        contact_path = out_dir / "contact.npz"
-        if not contact_path.exists():
-            raise RuntimeError(f"runner did not produce {contact_path}")
-        return contact_path
-
-    def _build_bundle(self, entry: Entry, msa_paths: dict[str, Path] | None, out_dir: Path) -> dict:
-        return {
+        bundle = {
             "entry_id": entry.id,
             "sequences": list(entry.sequences),
             "chain_ids": list(entry.chain_ids),
@@ -41,10 +40,6 @@ class ModelAdapter(ABC):
             "out_dir": str(out_dir),
             "config": self.config,
         }
-
-    def _run_in_env(self, bundle: dict) -> None:
-        if self.runner_script is None:
-            raise NotImplementedError(f"{self.name} adapter must set runner_script")
         python = self.env_path / "bin" / "python"
         if not python.exists():
             raise FileNotFoundError(f"no python at {python}")
@@ -52,20 +47,7 @@ class ModelAdapter(ABC):
             [str(python), str(self.runner_script)],
             input=json.dumps(bundle), text=True, check=True,
         )
-
-    def _run_in_host(self, bundle: dict) -> None:
-        raise NotImplementedError(f"{self.name} runs in env; set env_path in the config")
-
-
-MODELS: dict[str, type[ModelAdapter]] = {}
-
-
-def register_model(cls: type[ModelAdapter]) -> type[ModelAdapter]:
-    MODELS[cls.name] = cls
-    return cls
-
-
-def load_model(name: str, config: dict) -> ModelAdapter:
-    if name not in MODELS:
-        raise KeyError(f"unknown model {name!r}; registered: {sorted(MODELS)}")
-    return MODELS[name](config=config)
+        contact_path = out_dir / "contact.npz"
+        if not contact_path.exists():
+            raise RuntimeError(f"runner did not produce {contact_path}")
+        return contact_path

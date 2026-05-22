@@ -26,7 +26,7 @@ import torch
 from biotite.structure import AtomArray
 from biotite.structure.io.pdb import PDBFile
 
-from ecstasy.structure import _AA3to1  # noqa: E402
+from ecstasy.structure import AA3_TO_1
 
 ROOT = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1")
 DIMERS_PATH = ROOT / "candidates" / "dimers.parquet"
@@ -87,7 +87,7 @@ def load_chain_pdb(path: Path) -> ChainBundle:
         if len(res) == 0:
             continue
         res_name = res.res_name[0]
-        seq_chars.append(_AA3to1.get(res_name, "X"))
+        seq_chars.append(AA3_TO_1.get(res_name, "X"))
         # Find Cβ; synthesize if missing
         cb_mask = res.atom_name == "CB"
         if cb_mask.any():

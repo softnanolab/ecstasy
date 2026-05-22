@@ -17,7 +17,7 @@ Public API:
     select_chain_atoms(atoms, chain_id) -> AtomArray
     ChainView                          -- (chain_id, res_ids, sequence,
                                           backbone_xyz, backbone_res_idx)
-    BACKBONE_ATOMS, INTERFACE_CUTOFF_A
+    AA3_TO_1, BACKBONE_ATOMS, INTERFACE_CUTOFF_A
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ class ChainView:
     backbone_res_idx: np.ndarray  # (n_backbone_atoms,) index into res_ids for each backbone atom
 
 
-_AA3to1 = {
+AA3_TO_1 = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
     "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
     "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
@@ -98,7 +98,7 @@ def split_into_chains(atoms: AtomArray) -> list[ChainView]:
         for rid in res_ids:
             res_atoms = chain_atoms[chain_atoms.res_id == rid]
             res_name = res_atoms.res_name[0]
-            seq_chars.append(_AA3to1.get(res_name, "X"))
+            seq_chars.append(AA3_TO_1.get(res_name, "X"))
         sequence = "".join(seq_chars)
 
         bb_mask = np.isin(chain_atoms.atom_name, BACKBONE_ATOMS)
