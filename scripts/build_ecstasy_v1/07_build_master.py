@@ -17,7 +17,6 @@ loader can be wired with minimal changes.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,8 +26,7 @@ import torch
 from biotite.structure import AtomArray
 from biotite.structure.io.pdb import PDBFile
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import _AA3to1  # noqa: E402
+from ecstasy.structure import _AA3to1  # noqa: E402
 
 ROOT = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1")
 DIMERS_PATH = ROOT / "candidates" / "dimers.parquet"

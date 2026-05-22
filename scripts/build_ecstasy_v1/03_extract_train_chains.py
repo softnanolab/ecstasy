@@ -14,15 +14,13 @@ PDB files because dumping is cheap and parallel.
 from __future__ import annotations
 
 import multiprocessing as mp
-import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import (  # noqa: E402
+from ecstasy.structure import (  # noqa: E402
     load_local_cif,
     select_chain_atoms,
     split_into_chains,
