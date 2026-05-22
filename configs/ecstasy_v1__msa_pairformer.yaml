@@ -6,8 +6,8 @@
 benchmark: ecstasy_v1
 model: msa_pairformer
 data_root: /projects/u6jv/ecstasy
-env_path: ./envs/.venv-esmfold
 model_config:
+  env_path: ./envs/.venv-esmfold
   complex_a3m_dir: /projects/u6jv/ecstasy/benchmarks/ecstasy_v1/msas
   max_msa_depth: 512
   weights_dir: /projects/u6jv/ecstasy/weights/msa_pairformer
