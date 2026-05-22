@@ -9,15 +9,14 @@ __version__ = "0.1.0"
 __author__ = "Harsh Agrawal"
 __email__ = "harshagrawal.1312@gmail.com"
 
-# Import main modules to make them available at package level
-from . import utils
-from . import predict
-from . import profiling
-from . import permutation_invariance
+# Heavy submodules are imported on demand. Lightweight subpackages
+# (metrics, benchmarks, models, msa, pipelines) can be imported without pulling
+# in the full structure-analysis stack (biotite, seaborn, DockQ, etc.).
+__all__ = ["utils", "predict", "profiling", "permutation_invariance"]
 
-__all__ = [
-    "utils",
-    "predict", 
-    "profiling",
-    "permutation_invariance",
-] 
+
+def __getattr__(name):
+    if name in __all__:
+        import importlib
+        return importlib.import_module(f".{name}", __name__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

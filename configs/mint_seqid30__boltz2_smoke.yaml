@@ -1,0 +1,15 @@
+# Smoke variant of mint_seqid30__boltz2: 1 entry, single-sequence (no MSA).
+# Validates the ecstasy adapter + runner + benchmark + pipeline end-to-end.
+benchmark: mint_seqid30
+model: boltz2
+data_root: /projects/u6jv/boltz_benchmarking/DATA
+
+model_config:
+  env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-boltz
+  recycling_steps: 3
+  sampling_steps: 25
+  diffusion_samples: 1
+  num_workers: 0
+  no_kernels: true
+  contact_cutoff_bin: 19
+  predict_limit: 1

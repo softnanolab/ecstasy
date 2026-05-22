@@ -18,6 +18,7 @@ dependencies = [
     "biotite",
     "numpy",
     "pandas",
+    "pyarrow",
     "psutil",
     "requests",
     "seaborn",
@@ -27,7 +28,12 @@ dependencies = [
     "black",
     "DockQ",
     "tqdm",
+    "fire",
+    "pyyaml",
 ]
+
+[project.scripts]
+ecstasy = "ecstasy.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -39,4 +45,18 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ecstasy" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.txt", "*.md"] 
+"ecstasy" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.txt", "*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "installation: per-venv import/install checks (subprocess into each model venv)",
+    "integration: end-to-end CLI tests that load models and produce contact.npz",
+    "gpu: requires CUDA on the running process or a model subprocess",
+    "slow: long-running (>5 min wallclock)",
+    "model_boltz2: boltz2 predict smoke",
+    "model_mint: mint predict smoke",
+    "model_esmfold: esmfold predict smoke",
+    "model_msa_pairformer: MSA Pairformer predict smoke",
+    "model_colabfold: ColabFold (AF2) predict smoke",
+]

@@ -1,0 +1,8 @@
+benchmark: mint_seqid30
+model: mint
+data_root: /projects/u6jv/boltz_benchmarking/DATA
+
+model_config:
+  env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-boltz
+  contact_threshold_bin: 5
+  predict_limit: 1
