@@ -3,7 +3,7 @@
 For each entry in master/index.parquet, loads:
   - predictions/msa_pairformer/<run_id>/<id>/contact.npz   (full L x L probs)
   - master/data/<id[:2]>/<id>.pt                            (rectangular Na x Nb GT)
-and computes Pinder/MINT-style interchain Precision@K via the benchmark's
+and computes Pinder/MENTOS-style interchain Precision@K via the benchmark's
 score() method.
 
 Outputs:

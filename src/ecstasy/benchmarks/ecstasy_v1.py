@@ -1,7 +1,7 @@
 """ecstasy_v1: leakage-free dimer benchmark.
 
 Built from Boltz-2's validation_ids_v2.txt (deposited 2023-06-07 -> 2023-12-27,
-post-Boltz-2 training cutoff) and Foldseek-deleaked against MINT-softnano
+post-Boltz-2 training cutoff) and Foldseek-deleaked against MENTOS-softnano
 training chains at Pinder defaults (coverage >= 0.5, LDDT >= 0.7). 222 dimers
 total (83 homo / 139 hetero).
 
@@ -29,7 +29,7 @@ class EcstasyV1Bench(Benchmark):
     parquet = root / "index.parquet"
 
     # Cβ-Cβ contact threshold in distogram bins.
-    # MINT binning: bin 0 = d <= 4, bin k in 1..8 = k+3 < d <= k+4, bin 9 = d > 12
+    # MENTOS binning: bin 0 = d <= 4, bin k in 1..8 = k+3 < d <= k+4, bin 9 = d > 12
     # "contact" defined as Cβ-Cβ < 8 Å -> bins 0..4 (i.e. < 5).
     contact_threshold_bin: int = 5
 

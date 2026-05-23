@@ -1,9 +1,9 @@
-# Ecstasy benchmark config: ESMFold on MINT seq_id_30 val (interchain P@K).
+# Ecstasy benchmark config: ESMFold on MENTOS seq_id_30 val (interchain P@K).
 #
 # ESMFold is single-sequence — no MSA needed. Chains are joined with a 25-residue
 # poly-glycine linker; the runner softmaxes the trunk distogram, sums bins 0..18
 # (≈ Cβ < 8 Å), and trims linker positions to recover an (L, L) over residues only.
-benchmark: mint_seqid30
+benchmark: mentos_seqid30
 model: esmfold
 data_root: /projects/u6jv/boltz_benchmarking/DATA
 

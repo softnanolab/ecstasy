@@ -1,17 +1,17 @@
 """Build the ecstasy_v1 master test set after applying the deleak cut.
 
 Cut rule (Pinder Level-2 defaults):
-    drop dimer if EITHER chain has any Foldseek hit to MINT-train with
+    drop dimer if EITHER chain has any Foldseek hit to MENTOS-train with
     coverage >= 0.5 AND LDDT >= 0.7.
 
 For each surviving dimer:
     - load chain A and chain B PDB files (already in candidates/chains/)
     - extract Cβ atoms (synthesize virtual Cβ for Gly)
     - compute Cβ-Cβ inter-chain distance map
-    - bin into 10 classes (MINT scheme: bin 0 = d<=4, bin k in 1..8 = k+3<d<=k+4, bin 9 = d>12)
+    - bin into 10 classes (MENTOS scheme: bin 0 = d<=4, bin k in 1..8 = k+3<d<=k+4, bin 9 = d>12)
     - write <out>/data/<id[:2]>/<id>.pt with `contact_map`, `distance_map`, `sequences`
 
-Manifest schema mirrors MINT's seq_id_30 index.parquet so the benchmark
+Manifest schema mirrors MENTOS's seq_id_30 index.parquet so the benchmark
 loader can be wired with minimal changes.
 """
 
@@ -44,7 +44,7 @@ REPORT_PATH = MASTER_DIR / "master_README.md"
 COVERAGE_TH = 0.5
 LDDT_TH = 0.7
 
-# MINT 10-bin distogram
+# MENTOS 10-bin distogram
 # bin 0 = d<=4; bin k (1..8) = k+3 < d <= k+4; bin 9 = d>12
 DISTOGRAM_BINS = np.array([4, 5, 6, 7, 8, 9, 10, 11, 12], dtype=np.float32)
 
@@ -113,7 +113,7 @@ def compute_interchain_contact_map(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (distance_map (Na, Nb) float32, contact_map (Na, Nb) int64).
 
-    contact_map is the 10-bin MINT distogram. Missing-Cβ entries get -1.
+    contact_map is the 10-bin MENTOS distogram. Missing-Cβ entries get -1.
     """
     na = len(bundle_a.cb_xyz)
     nb = len(bundle_b.cb_xyz)
@@ -238,12 +238,12 @@ def main() -> int:
     md.append("- Source: Boltz-2 `validation_ids_v2.txt` (upstream/v2, 397/398 PDB IDs, 2023-06-07 → 2023-12-27)")
     md.append("- Bio-assembly: assembly 1, all chain pairs with backbone-atom ≤10Å contact")
     md.append("- Quality filter: X-ray, resolution ≤3.5 Å, min chain ≥40 res, total ≤1200 res, ≥3 contact pairs")
-    md.append(f"- Foldseek deleak: candidates vs MINT-softnano train chains (PDB ≤2021-09-30)")
+    md.append(f"- Foldseek deleak: candidates vs MENTOS-softnano train chains (PDB ≤2021-09-30)")
     md.append(f"  - drop rule: Pinder Level-2 — drop if either chain has any hit with coverage ≥ {COVERAGE_TH} AND LDDT ≥ {LDDT_TH}")
     md.append("")
     md.append("## Counts")
     md.append(f"- Candidate dimers: 319")
-    md.append(f"  - flagged as MINT-train leak: 97  ({100*97/319:.1f}%)")
+    md.append(f"  - flagged as MENTOS-train leak: 97  ({100*97/319:.1f}%)")
     md.append(f"  - **kept (this master set): {len(manifest)}**")
     if len(manifest):
         md.append(f"    - homodimers: {int(manifest['is_homodimer'].sum())}")
@@ -263,7 +263,7 @@ def main() -> int:
     md.append("- `id`, `pdb_id`, `chain_a`, `chain_b`")
     md.append("- `sequences`: list of two str (chain A, chain B 1-letter seqs)")
     md.append("- `res_ids`: list of two int lists (auth residue numbers in chain order)")
-    md.append("- `contact_map`: torch int64 (Na, Nb), MINT 10-bin Cβ-Cβ scheme; `-1` = missing Cβ")
+    md.append("- `contact_map`: torch int64 (Na, Nb), MENTOS 10-bin Cβ-Cβ scheme; `-1` = missing Cβ")
     md.append("- `distance_map`: torch float32 (Na, Nb), raw Cβ-Cβ distances in Å")
     md.append("- `is_homodimer`: bool")
     md.append("")

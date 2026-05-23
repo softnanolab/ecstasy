@@ -4,14 +4,14 @@ import numpy as np
 
 
 def pak_from_pairs(probs: np.ndarray, truth: np.ndarray) -> dict[str, float]:
-    """MINT-style Precision@K / P@K/2 / P@K/5 / AUC on a flat array of pairs.
+    """MENTOS-style Precision@K / P@K/2 / P@K/5 / AUC on a flat array of pairs.
 
     `probs` and `truth` are 1-D arrays of the same length. Each index is one
     candidate (residue-pair). Caller is responsible for selecting which pairs
     enter the metric (interchain-only, strict-upper-triangle, etc.).
 
     Returns the canonical metric dict used across the ecstasy benchmarks.
-    "AUC" here is MINT's mean-precision over top-K_eff (NOT standard ROC-AUC);
+    "AUC" here is MENTOS's mean-precision over top-K_eff (NOT standard ROC-AUC);
     the name is kept for direct comparability with prior baselines.
     """
     probs = np.asarray(probs, dtype=np.float64).ravel()

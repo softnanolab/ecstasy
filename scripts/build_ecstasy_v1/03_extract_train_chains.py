@@ -1,7 +1,7 @@
-"""Extract per-chain PDB files from MINT-train PDB CIFs for the Foldseek DB.
+"""Extract per-chain PDB files from MENTOS-train PDB CIFs for the Foldseek DB.
 
-MINT-softnano's train split (PDB <= 2021-09-30) has 25,682 dimer entries.
-CIFs live at /projects/u6jv/public/MINT/DATA/pdb/raw/cif_unzipped/<bucket>/<id>.cif
+MENTOS-softnano's train split (PDB <= 2021-09-30) has 25,682 dimer entries.
+CIFs live at /projects/u6jv/public/MENTOS/DATA/pdb/raw/cif_unzipped/<bucket>/<id>.cif
 where <bucket> is a numeric hash bucket (000-...). We build a one-time
 filename index, then for each train entry load the CIF and dump every
 distinct protein chain as a PDB file.
@@ -27,24 +27,24 @@ from ecstasy.structure import (  # noqa: E402
     write_chain_pdb,
 )
 
-MINT_SPLIT_PARQUET = Path(
-    "/projects/u6jv/public/MINT/DATA/pdb/processed/splits/seq_id_30/index.parquet"
+MENTOS_SPLIT_PARQUET = Path(
+    "/projects/u6jv/public/MENTOS/DATA/pdb/processed/splits/seq_id_30/index.parquet"
 )
-MINT_CIF_ROOT = Path("/projects/u6jv/public/MINT/DATA/pdb/raw/cif_unzipped")
+MENTOS_CIF_ROOT = Path("/projects/u6jv/public/MENTOS/DATA/pdb/raw/cif_unzipped")
 OUT_ROOT = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/train_db")
-CHAINS_DIR = OUT_ROOT / "mint_train_chains"
-INDEX_PATH = OUT_ROOT / "mint_train_chains_manifest.parquet"
-MISSING_PATH = OUT_ROOT / "mint_train_missing.parquet"
+CHAINS_DIR = OUT_ROOT / "mentos_train_chains"
+INDEX_PATH = OUT_ROOT / "mentos_train_chains_manifest.parquet"
+MISSING_PATH = OUT_ROOT / "mentos_train_missing.parquet"
 
 MIN_CHAIN_LEN = 40
-DATE_CUTOFF = "2021-09-30"  # MINT-softnano train cutoff
+DATE_CUTOFF = "2021-09-30"  # MENTOS-softnano train cutoff
 
 
 def build_cif_index() -> dict[str, Path]:
-    """Scan MINT cif_unzipped/ once to map pdb_id -> CIF path."""
-    print(f"Building CIF index under {MINT_CIF_ROOT} ...")
+    """Scan MENTOS cif_unzipped/ once to map pdb_id -> CIF path."""
+    print(f"Building CIF index under {MENTOS_CIF_ROOT} ...")
     idx: dict[str, Path] = {}
-    for bucket in sorted(MINT_CIF_ROOT.iterdir()):
+    for bucket in sorted(MENTOS_CIF_ROOT.iterdir()):
         if not bucket.is_dir():
             continue
         for cif in bucket.glob("*.cif"):
@@ -54,7 +54,7 @@ def build_cif_index() -> dict[str, Path]:
 
 
 def process_one(args: tuple[str, str]) -> dict:
-    """Worker: load CIF for one MINT-train entry, dump per-chain PDBs."""
+    """Worker: load CIF for one MENTOS-train entry, dump per-chain PDBs."""
     pdb_id, cif_path_s = args
     cif_path = Path(cif_path_s)
     out: dict = {
@@ -95,10 +95,10 @@ def main() -> int:
     CHAINS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Train ID list (de-duplicated)
-    split_df = pd.read_parquet(MINT_SPLIT_PARQUET)
+    split_df = pd.read_parquet(MENTOS_SPLIT_PARQUET)
     train_ids = sorted(split_df.loc[split_df["split"] == "train", "id"].unique().tolist())
     train_ids = [pid.lower() for pid in train_ids]
-    print(f"MINT-train PDB IDs (seq_id_30): {len(train_ids)}")
+    print(f"MENTOS-train PDB IDs (seq_id_30): {len(train_ids)}")
 
     # CIF filename index (one-time scan)
     cif_idx = build_cif_index()
@@ -142,7 +142,7 @@ def main() -> int:
     chains_df = pd.DataFrame(all_chains)
     status_df = pd.DataFrame(statuses)
     chains_df.to_parquet(INDEX_PATH, index=False)
-    status_df.to_parquet(OUT_ROOT / "mint_train_per_entry_log.parquet", index=False)
+    status_df.to_parquet(OUT_ROOT / "mentos_train_per_entry_log.parquet", index=False)
 
     print()
     print(f"  wrote {INDEX_PATH}  ({len(chains_df)} chain PDBs)")

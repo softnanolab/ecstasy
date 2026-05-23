@@ -1,5 +1,5 @@
 # Smoke variant: 1 entry, single_sequence (no MSA) so we don't hit api.colabfold.com.
-benchmark: mint_seqid30
+benchmark: mentos_seqid30
 model: colabfold
 data_root: /projects/u6jv/boltz_benchmarking/DATA
 

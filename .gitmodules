@@ -9,9 +9,9 @@
 [submodule "modules/esm"]
 	path = modules/esm
 	url = https://github.com/softnanolab/esm.git
-[submodule "modules/mint"]
-	path = modules/mint
-	url = git@github.com:softnanolab/mint.git
+[submodule "modules/mentos"]
+	path = modules/mentos
+	url = git@github.com:softnanolab/mentos.git
 [submodule "modules/msa_pairformer"]
 	path = modules/msa_pairformer
 	url = git@github.com:softnanolab/MSA_Pairformer.git

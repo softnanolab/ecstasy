@@ -1,10 +1,10 @@
-# Ecstasy benchmark config: Boltz-2 on MINT seq_id_30 val (interchain P@K).
-benchmark: mint_seqid30
+# Ecstasy benchmark config: Boltz-2 on MENTOS seq_id_30 val (interchain P@K).
+benchmark: mentos_seqid30
 model: boltz2
 data_root: /projects/u6jv/boltz_benchmarking/DATA
 
 model_config:
-  # Python env with boltz installed from feat/extract-distogram-2.2.1 + mint editable.
+  # Python env with boltz installed from feat/extract-distogram-2.2.1 + mentos editable.
   # Will be replaced by `envs/boltz/` once scripts/install/boltz.sh is rewritten
   # for aarch64 + Python 3.12.
   env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-boltz

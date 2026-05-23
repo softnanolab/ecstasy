@@ -9,7 +9,7 @@ Bundle's config["model_config"] (all optional):
   chunk_size          — axial-attention chunk; reduces memory at small wallclock cost
   contact_cutoff_bin  — distogram bin index below which Cβ-Cβ counts as contact.
                         ESMFold uses linspace(2.3125, 21.6875, 63) of squared distance
-                        boundaries; bin 19 ≈ 8 Å (matches MINT's threshold).
+                        boundaries; bin 19 ≈ 8 Å (matches MENTOS's threshold).
 
 Writes:
   <out_dir>/contact.npz   — probs (L, L) float16, length int32

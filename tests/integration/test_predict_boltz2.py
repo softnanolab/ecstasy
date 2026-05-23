@@ -23,8 +23,8 @@ def test_predict_boltz2(smoke_config, run_ecstasy):
 def test_score_boltz2(smoke_config, run_ecstasy, repo_root):
     """Predict (orchestrator) then score (.venv-boltz).
 
-    `bench score` loads MINT-pickled .pt GT files via torch — needs torch and
-    mint installed. The orchestrator (.venv-ecstasy) intentionally has neither,
+    `bench score` loads MENTOS-pickled .pt GT files via torch — needs torch and
+    mentos installed. The orchestrator (.venv-ecstasy) intentionally has neither,
     so we drive `score` from .venv-boltz, matching the prod smoke sbatch usage.
     """
     import json
@@ -46,8 +46,8 @@ def test_score_boltz2(smoke_config, run_ecstasy, repo_root):
     )
     assert r.returncode == 0, f"score failed\nstdout: {r.stdout}\nstderr: {r.stderr}"
 
-    results_dir = read_smoke_data_root(cfg) / "ecstasy" / "benchmarks" / "mint_seqid30" / "results"
-    jsons = list(results_dir.glob("mint_seqid30__boltz2__*.json"))
+    results_dir = read_smoke_data_root(cfg) / "ecstasy" / "benchmarks" / "mentos_seqid30" / "results"
+    jsons = list(results_dir.glob("mentos_seqid30__boltz2__*.json"))
     assert jsons, f"no results JSON under {results_dir}"
     payload = json.loads(jsons[0].read_text())
     summary = payload["summary"]
