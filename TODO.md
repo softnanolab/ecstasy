@@ -9,20 +9,20 @@ references that remain in code point at `/projects/u6jv/boltz_benchmarking/DATA/
 
 ## Current state (2026-05-10)
 
-5 model adapters wired against the `mint_seqid30` benchmark (1,511 dimers,
-MINT seq_id_30 val split, interchain Cβ < 8 Å contact P@K). Each has been
+5 model adapters wired against the `mentos_seqid30` benchmark (1,511 dimers,
+MENTOS seq_id_30 val split, interchain Cβ < 8 Å contact P@K). Each has been
 smoke-tested on one entry (`10jy`, 286 residues, homodimer):
 
 | model               | smoke P@K | mode                      | notes                                                      |
 | ------------------- | --------- | ------------------------- | ---------------------------------------------------------- |
 | `boltz2`            | 0.502     | with-MSA, full validation | reproduces baseline exactly; patch on a fork branch        |
-| `mint`              | 0.287     | single-sequence (650m)    | matches `evaluate_from_wandb` to 1e-6                      |
+| `mentos`              | 0.287     | single-sequence (650m)    | matches `evaluate_from_wandb` to 1e-6                      |
 | `esmfold`           | 0.685     | single-sequence (3B)      | strongest no-MSA baseline                                  |
 | `colabfold` (AF2)   | 0.000     | single-sequence on CPU    | with-MSA is blocked on aarch64 (see "Known issues")        |
 | `msa_pairformer`    | 0.000     | single-sequence           | needs real complex MSAs to give signal                     |
 
-Run `ecstasy bench compare --task mint_seqid30` from inside the venv to refresh
-`/projects/u6jv/boltz_benchmarking/DATA/ecstasy/benchmarks/mint_seqid30/results/mint_seqid30__comparison.{csv,md}`.
+Run `ecstasy bench compare --task mentos_seqid30` from inside the venv to refresh
+`/projects/u6jv/boltz_benchmarking/DATA/ecstasy/benchmarks/mentos_seqid30/results/mentos_seqid30__comparison.{csv,md}`.
 
 ## Immediate next moves (in priority order)
 
@@ -49,8 +49,8 @@ For each working adapter:
 ```bash
 cd ~/ecstasy
 source /home/u6jv/harsh.u6jv/boltz_benchmarking/tmp/.venv-esmfold/bin/activate
-ecstasy bench predict --config configs/mint_seqid30__<model>.yaml --submit
-ecstasy bench score   --config configs/mint_seqid30__<model>.yaml
+ecstasy bench predict --config configs/mentos_seqid30__<model>.yaml --submit
+ecstasy bench score   --config configs/mentos_seqid30__<model>.yaml
 ```
 
 `--submit` is not yet implemented in `run_predict` (it raises NotImplementedError
@@ -64,7 +64,7 @@ scheduler.)
 
 Expected wallclock per entry (286-residue dimer reference, GH200):
 - boltz2 with-MSA: 30–60 s (already validated across 1,511 entries)
-- mint (650M): 1 min including model load (probably 5–10 s once warm)
+- mentos (650M): 1 min including model load (probably 5–10 s once warm)
 - esmfold (3B): 2 min including weight download
 - colabfold (AF2 with-MSA): blocked — see "Known issues"
 - msa_pairformer: 30 s once weights cached
@@ -82,7 +82,7 @@ cd ~/colabfold-local
 ./scripts/run_pipeline.sh <input.fasta> <output_dir>/ confind_contacts
 ```
 
-Then in `configs/mint_seqid30__msa_pairformer.yaml`:
+Then in `configs/mentos_seqid30__msa_pairformer.yaml`:
 ```yaml
 model_config:
   complex_a3m_dir: /path/to/<output_dir>/msa/
@@ -115,7 +115,7 @@ reproducible recipe for rebuilding them from scratch:
 - `scripts/install/boltz.sh` (exists, x86_64) — rewrite for aarch64 GH200
   + Python 3.12 + cu124 torch + the patched boltz submodule. Should write into
   `./envs/boltz/` (a new conda env, separate from the existing `.venv-boltz`).
-- `scripts/install/mint.sh` (NEW) — Python 3.12 + cu124 torch + `pip install -e modules/mint`
+- `scripts/install/mentos.sh` (NEW) — Python 3.12 + cu124 torch + `pip install -e modules/mentos`
 - `scripts/install/esmfold.sh` (exists, x86_64) — rewrite per the
   install recipe documented in PR #N (or your scheduler's equivalent)
   (gcc-native/13.2, CUDA 12.6, --no-build-isolation, dllogger stub, biopython
@@ -134,27 +134,27 @@ When these are written and tested, change every config's `env_path:` from
 CPU JAX works (`JAX_PLATFORMS=cpu` in the sbatch). Diagnostic job log:
 `/projects/u6jv/boltz_benchmarking/DATA/ecstasy/smoke_colabfold/logs/ecstasy_smoke_colabfold_4533246.out`.
 
-### ~~Mint contact-threshold edge case~~  (fixed)
+### ~~Mentos contact-threshold edge case~~  (fixed)
 
-Previously `benchmarks/mint_seqid30.py:gt_for` did `contact_map < 5`, which
-incorrectly counted `-1` padding entries (returned by MINT's processing for
+Previously `benchmarks/mentos_seqid30.py:gt_for` did `contact_map < 5`, which
+incorrectly counted `-1` padding entries (returned by MENTOS's processing for
 missing residues) as contacts. Fixed: gt_for now masks with
 `(raw >= 0) & (raw < self.contact_threshold_bin)`. Any prior P@K numbers
 computed on entries with missing residues were systematically inflated and
 should be regenerated.
 
-### MINT AUC name mismatch
+### MENTOS AUC name mismatch
 
-`metrics.contact.pak_inter_chain` returns "AUC" but uses MINT's mean-precision
+`metrics.contact.pak_inter_chain` returns "AUC" but uses MENTOS's mean-precision
 formula (`mean(cum / arange)` over top-K), not standard ROC-AUC. Kept under
-that name for direct comparability with prior MINT baselines. Document this
+that name for direct comparability with prior MENTOS baselines. Document this
 in any external write-up, or rename to `mean_PK_curve` if standard ROC-AUC
 matters for some publication.
 
 ### MSA dedup for cross-model MSA reuse
 
 The benchmark already has 2,371 unique-chain a3ms at
-`/projects/u6jv/boltz_benchmarking/DATA/benchmarks/mint_val_seqid30/msas/<sha256(seq)[:16]>.a3m`
+`/projects/u6jv/boltz_benchmarking/DATA/benchmarks/mentos_val_seqid30/msas/<sha256(seq)[:16]>.a3m`
 from the original Boltz-2 work. These are unpaired per-chain MSAs. For
 ColabFold and MSA Pairformer (which need paired complex MSAs), this needs a
 pairing step — colabfold-local does it as part of `01_generate_msa.sh`.
@@ -163,17 +163,17 @@ pairing step — colabfold-local does it as part of `01_generate_msa.sh`.
 
 ```
 DATA_ROOT           /projects/u6jv/boltz_benchmarking/DATA           # set in ecstasy/.env
-BENCHMARK DATA      $DATA_ROOT/ecstasy/benchmarks/mint_seqid30/
+BENCHMARK DATA      $DATA_ROOT/ecstasy/benchmarks/mentos_seqid30/
   predictions/<model>/<run_id>/<entry_id>/contact.npz                # cross-model contract
   results/<bench>__<model>__<run_id>.json
   results/<bench>__comparison.{csv,md}                               # from `ecstasy bench compare`
 
-MINT GT             /projects/u6jv/public/MINT/DATA/pdb/processed/data/<pdb_id[:2]>/<pdb_id>.pt
-SPLIT PARQUET       /projects/u6jv/public/MINT/DATA/pdb/processed/splits/seq_id_30/index.parquet
+MENTOS GT             /projects/u6jv/public/MENTOS/DATA/pdb/processed/data/<pdb_id[:2]>/<pdb_id>.pt
+SPLIT PARQUET       /projects/u6jv/public/MENTOS/DATA/pdb/processed/splits/seq_id_30/index.parquet
 COLABFOLD DBs       /projects/u6jv/public/colabfold_dbs/                      # 295 GB padded for mmseqs-gpu
 
 VENVS (all under ecstasy/envs/; referenced absolutely by every config)
-  envs/.venv-boltz     # py3.12, torch 2.4.1+cu124, boltz feat/extract-distogram-2.2.1, mint, ecstasy
+  envs/.venv-boltz     # py3.12, torch 2.4.1+cu124, boltz feat/extract-distogram-2.2.1, mentos, ecstasy
   envs/.venv-esmfold   # py3.12, torch 2.4.1+cu124, fair-esm, openfold (patched), msa-pairformer, ecstasy
   envs/.venv-colabfold # py3.11, colabfold 1.6.1 + jax 0.5.3 + alphafold-colabfold + tensorflow
 
@@ -182,10 +182,10 @@ MMSEQS BINARIES (vendored under ecstasy/tools/; used by ecstasy.msa.colabfold pi
   ecstasy/tools/mmseqs-gpu/bin/mmseqs            # GPU, GH200-built
 
 EXISTING (LEGACY) PREDICTIONS  (pre-ecstasy, on /projects only — no /home dep)
-  $DATA_ROOT/benchmarks/mint_val_seqid30/predictions/                # Boltz-2 with-MSA distograms × 1,511
-  $DATA_ROOT/benchmarks/mint_val_seqid30/predictions_nomsa/          # Boltz-2 no-MSA distograms × 1,511
-  $DATA_ROOT/benchmarks/mint_val_seqid30/results/boltz2_pak{,_nomsa}.json
-  $DATA_ROOT/benchmarks/mint_val_seqid30/msas/<sha256(seq)[:16]>.a3m # 2,371 unpaired per-chain MSAs
+  $DATA_ROOT/benchmarks/mentos_val_seqid30/predictions/                # Boltz-2 with-MSA distograms × 1,511
+  $DATA_ROOT/benchmarks/mentos_val_seqid30/predictions_nomsa/          # Boltz-2 no-MSA distograms × 1,511
+  $DATA_ROOT/benchmarks/mentos_val_seqid30/results/boltz2_pak{,_nomsa}.json
+  $DATA_ROOT/benchmarks/mentos_val_seqid30/msas/<sha256(seq)[:16]>.a3m # 2,371 unpaired per-chain MSAs
 ```
 
 If you want to keep the legacy `~/boltz_benchmarking/` checkout, that's fine —
@@ -224,18 +224,18 @@ ecstasy/
     __init__.py                                 # lazy imports (don't pull biotite/seaborn for light modules)
     cli.py                                      # fire-based; bench list|msa|predict|score|all|compare
                                                 # --model_config / --model_weights flags flow into cfg["model_config"]
-    benchmarks/{__init__,base,mint_seqid30}.py
-    models/{__init__,base,boltz2,mint,esmfold,colabfold,msa_pairformer}.py
-    models/_runners/{boltz2,mint,esmfold,colabfold,msa_pairformer}_runner.py
+    benchmarks/{__init__,base,mentos_seqid30}.py
+    models/{__init__,base,boltz2,mentos,esmfold,colabfold,msa_pairformer}.py
+    models/_runners/{boltz2,mentos,esmfold,colabfold,msa_pairformer}_runner.py
     msa/__init__.py                             # placeholder; ecstasy.msa.colabfold.materialize_msas not yet implemented
-    metrics/contact.py                          # MINT-compatible pak_inter_chain; 5/5 tests pass
+    metrics/contact.py                          # MENTOS-compatible pak_inter_chain; 5/5 tests pass
     pipelines/contact_prediction.py             # run_msa (stub), run_predict, run_score, run_compare
-  configs/mint_seqid30__{boltz2,mint,esmfold,colabfold,msa_pairformer}{,_smoke}.yaml
+  configs/mentos_seqid30__{boltz2,mentos,esmfold,colabfold,msa_pairformer}{,_smoke}.yaml
   scripts/
     install/                                    # existing x86_64-specific; aarch64 rewrites pending
     sbatch/                                     # smoke harnesses; install_openfold.sbatch documents the working recipe
-    diag_mint_inference.py
-  modules/{boltz,esm,openfold,mint,msa_pairformer}/   # 5 git submodules
+    diag_mentos_inference.py
+  modules/{boltz,esm,openfold,mentos,msa_pairformer}/   # 5 git submodules
   tests/test_metrics_contact.py                 # numpy round-trip P@K + ROC-AUC checks
 ```
 
@@ -246,14 +246,14 @@ cd ~/ecstasy
 git status -s                                       # what's uncommitted
 source ./envs/.venv-esmfold/bin/activate            # ecstasy CLI lives here
 ecstasy bench list                                  # current registries
-ecstasy bench compare --task mint_seqid30           # latest aggregated table
+ecstasy bench compare --task mentos_seqid30           # latest aggregated table
 
 # To re-run a smoke for any model — wrap in your scheduler. The actual command is:
-ecstasy bench predict --config configs/mint_seqid30__<model>_smoke.yaml --submit
-ecstasy bench score   --config configs/mint_seqid30__<model>_smoke.yaml
+ecstasy bench predict --config configs/mentos_seqid30__<model>_smoke.yaml --submit
+ecstasy bench score   --config configs/mentos_seqid30__<model>_smoke.yaml
 
 # To kick off the real predict for a model:
-# (1) drop predict_limit from configs/mint_seqid30__<model>.yaml (or use the non-smoke variant)
-# (2) ecstasy bench predict --config configs/mint_seqid30__<model>.yaml --submit
-# (3) ecstasy bench score   --config configs/mint_seqid30__<model>.yaml
+# (1) drop predict_limit from configs/mentos_seqid30__<model>.yaml (or use the non-smoke variant)
+# (2) ecstasy bench predict --config configs/mentos_seqid30__<model>.yaml --submit
+# (3) ecstasy bench score   --config configs/mentos_seqid30__<model>.yaml
 ```

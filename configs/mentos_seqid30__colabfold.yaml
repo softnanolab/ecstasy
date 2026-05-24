@@ -1,5 +1,5 @@
-# Ecstasy benchmark config: ColabFold (AlphaFold-2 multimer) on MINT seq_id_30 val.
-benchmark: mint_seqid30
+# Ecstasy benchmark config: ColabFold (AlphaFold-2 multimer) on MENTOS seq_id_30 val.
+benchmark: mentos_seqid30
 model: colabfold
 data_root: /projects/u6jv/boltz_benchmarking/DATA
 

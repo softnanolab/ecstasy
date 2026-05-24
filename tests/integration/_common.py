@@ -28,7 +28,7 @@ def assert_predict_succeeded(completed, smoke_yaml_path: Path, model: str):
     data_root = read_smoke_data_root(smoke_yaml_path)
     npz = find_contact_npz(data_root, model, SMOKE_ENTRY_ID)
     assert npz is not None, (
-        f"no contact.npz produced under {data_root}/ecstasy/benchmarks/mint_seqid30/predictions/{model}/\n"
+        f"no contact.npz produced under {data_root}/ecstasy/benchmarks/mentos_seqid30/predictions/{model}/\n"
         f"--- STDOUT ---\n{completed.stdout}\n--- STDERR ---\n{completed.stderr}"
     )
     assert_valid_contact_npz(npz)

@@ -1,10 +1,10 @@
-"""Self-contained MINT runner — invoked via env's python from the outer adapter.
+"""Self-contained MENTOS runner — invoked via env's python from the outer adapter.
 
 Reads a JSON bundle from stdin:
   { entry_id, sequences[], chain_ids[], msa_paths{} (ignored), out_dir, config }
 
 Bundle's config["model_config"] must contain:
-  model_config_path  — path to a MINT (Hydra/OmegaConf) YAML config used to
+  model_config_path  — path to a MENTOS (Hydra/OmegaConf) YAML config used to
                        instantiate the ContactPrediction LightningModule.
   model_weights_path — path to a Lightning .ckpt (or .pt) of trained weights.
 
@@ -12,7 +12,7 @@ Writes:
   <out_dir>/contact.npz   — probs (L, L) float16, length int32
   <out_dir>/raw/raw_inter_logits_<id>.npz (optional debug)
 
-MINT is single-sequence (no MSA needed), takes per-chain residues, encodes
+MENTOS is single-sequence (no MSA needed), takes per-chain residues, encodes
 each chain as ``<cls>{seq}<eos>``, concatenates into a single token sequence
 with chain_ids per token, and runs the dual distogram head. Inter-chain
 logits are softmaxed and the bins below ``contact_threshold_bin`` (default 5,
@@ -67,34 +67,34 @@ def main():
     model_weights_path = cfg.get("model_weights_path")
     if not model_config_path or not model_weights_path:
         raise ValueError(
-            "mint adapter requires --model_config <yaml> and --model_weights <ckpt>"
+            "mentos adapter requires --model_config <yaml> and --model_weights <ckpt>"
         )
     cutoff_bin: int = int(cfg.get("contact_threshold_bin", 5))
 
     from omegaconf import OmegaConf
-    import mint
-    from mint.data.esm import Alphabet
+    import mentos
+    from mentos.data.esm import Alphabet
 
-    # `scripts.finetune.contact_prediction` is co-located with the mint repo but
+    # `scripts.finetune.contact_prediction` is co-located with the mentos repo but
     # not a Python package (the repo intends scripts to be run as `python -m`
     # from its root). Inject the repo root onto sys.path so `import scripts.…`
     # resolves regardless of cwd.
-    mint_repo = Path(mint.__path__[0]).parent.parent
-    if str(mint_repo) not in sys.path:
-        sys.path.insert(0, str(mint_repo))
+    mentos_repo = Path(mentos.__path__[0]).parent.parent
+    if str(mentos_repo) not in sys.path:
+        sys.path.insert(0, str(mentos_repo))
     from scripts.finetune.contact_prediction import ContactPrediction
 
-    mint_cfg = OmegaConf.load(model_config_path)
+    mentos_cfg = OmegaConf.load(model_config_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[mint] device={device}  cfg={model_config_path}  weights={model_weights_path}", flush=True)
+    print(f"[mentos] device={device}  cfg={model_config_path}  weights={model_weights_path}", flush=True)
 
-    model = ContactPrediction(mint_cfg)
+    model = ContactPrediction(mentos_cfg)
     ckpt = torch.load(model_weights_path, map_location=device, weights_only=False)
     missing, unexpected = model.load_state_dict(ckpt["state_dict"], strict=False)
     if missing:
-        print(f"[mint] {len(missing)} missing keys (first 3): {missing[:3]}", flush=True)
+        print(f"[mentos] {len(missing)} missing keys (first 3): {missing[:3]}", flush=True)
     if unexpected:
-        print(f"[mint] {len(unexpected)} unexpected keys (first 3): {unexpected[:3]}", flush=True)
+        print(f"[mentos] {len(unexpected)} unexpected keys (first 3): {unexpected[:3]}", flush=True)
     model.to(device)
     model.eval()
 
@@ -115,7 +115,7 @@ def main():
         probs=contact,
         length=np.int32(contact.shape[0]),
     )
-    print(f"[mint] WROTE {out_dir / 'contact.npz'}  shape={contact.shape}  cutoff_bin={cutoff_bin}",
+    print(f"[mentos] WROTE {out_dir / 'contact.npz'}  shape={contact.shape}  cutoff_bin={cutoff_bin}",
           flush=True)
 
 

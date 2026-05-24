@@ -10,10 +10,10 @@ from ecstasy.metrics.contact import pak_inter_chain
 
 
 @register_benchmark
-class MintSeqid30Bench(Benchmark):
-    name = "mint_seqid30"
-    parquet = Path("/projects/u6jv/public/MINT/DATA/pdb/processed/splits/seq_id_30/index.parquet")
-    gt_root = Path("/projects/u6jv/public/MINT/DATA/pdb/processed/data")
+class MentosSeqid30Bench(Benchmark):
+    name = "mentos_seqid30"
+    parquet = Path("/projects/u6jv/public/MENTOS/DATA/pdb/processed/splits/seq_id_30/index.parquet")
+    gt_root = Path("/projects/u6jv/public/MENTOS/DATA/pdb/processed/data")
     split = "val"
 
     def entries(self) -> Iterable[Entry]:
@@ -25,7 +25,7 @@ class MintSeqid30Bench(Benchmark):
             chain_ids = tuple(["A", "B"][: len(seqs)])
             yield Entry(id=str(row.id), sequences=seqs, chain_ids=chain_ids)
 
-    # MINT stores `contact_map` as a binned distance index in [0, 9] over edges
+    # MENTOS stores `contact_map` as a binned distance index in [0, 9] over edges
     # [4, 5, 6, 7, 8, 9, 10, 11, 12]. Bins 0-4 (< 8 Å Cβ-Cβ) are "contacts".
     contact_threshold_bin: int = 5
 
@@ -33,7 +33,7 @@ class MintSeqid30Bench(Benchmark):
         import torch
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
-        # MINT marks unresolved Cβ positions with bin = -1; those must NOT be
+        # MENTOS marks unresolved Cβ positions with bin = -1; those must NOT be
         # counted as contacts. Without the `>= 0` guard, `-1 < threshold` is
         # True and K gets inflated → P@K is systematically wrong for entries
         # with missing residues.

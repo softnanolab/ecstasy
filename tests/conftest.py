@@ -28,7 +28,7 @@ VENVS: dict[str, Path] = {
     "esmfold":   REPO_ROOT / "envs" / ".venv-esmfold",
     "colabfold": REPO_ROOT / "envs" / ".venv-colabfold",
 }
-SMOKE_ENTRY_ID = "10jy"  # 286-residue homodimer; mint_seqid30 val[0]
+SMOKE_ENTRY_ID = "10jy"  # 286-residue homodimer; mentos_seqid30 val[0]
 
 
 @pytest.fixture(scope="session")
@@ -74,7 +74,7 @@ def smoke_config(tmp_path: Path, repo_root: Path):
     import yaml
 
     def _make(model: str, extra: dict | None = None) -> Path:
-        src = repo_root / "configs" / f"mint_seqid30__{model}_smoke.yaml"
+        src = repo_root / "configs" / f"mentos_seqid30__{model}_smoke.yaml"
         if not src.exists():
             pytest.skip(f"smoke config missing: {src}")
         cfg = yaml.safe_load(src.read_text())
@@ -111,8 +111,8 @@ def run_ecstasy(repo_root: Path):
 
 
 def find_contact_npz(data_root: Path, model: str, entry_id: str = SMOKE_ENTRY_ID) -> Path | None:
-    """Locate <data_root>/ecstasy/benchmarks/mint_seqid30/predictions/<model>/<run_id>/<entry_id>/contact.npz."""
-    pattern = f"ecstasy/benchmarks/mint_seqid30/predictions/{model}/*/{entry_id}/contact.npz"
+    """Locate <data_root>/ecstasy/benchmarks/mentos_seqid30/predictions/<model>/<run_id>/<entry_id>/contact.npz."""
+    pattern = f"ecstasy/benchmarks/mentos_seqid30/predictions/{model}/*/{entry_id}/contact.npz"
     matches = list(Path(data_root).glob(pattern))
     return matches[0] if matches else None
 

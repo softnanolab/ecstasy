@@ -1,10 +1,10 @@
-# Ecstasy benchmark config: MSA Pairformer on MINT seq_id_30 val.
+# Ecstasy benchmark config: MSA Pairformer on MENTOS seq_id_30 val.
 #
 # For real with-MSA numbers, generate complex a3ms via softnanolab/colabfold-local
 # (the ColabFold MSA-search pipeline tuned for ISAMBARD GH200) and point
 # `complex_a3m_dir` at the output directory. Without it, the runner falls back
 # to a single-sequence a3m (degenerate baseline).
-benchmark: mint_seqid30
+benchmark: mentos_seqid30
 model: msa_pairformer
 data_root: /projects/u6jv/boltz_benchmarking/DATA
 

@@ -17,7 +17,7 @@ _RUNNERS_DIR = Path(__file__).resolve().parent / "_runners"
 MODELS: dict[str, dict] = {
     "boltz2":         {"needs_msa": True,  "runner": "boltz2_runner.py"},
     "esmfold":        {"needs_msa": False, "runner": "esmfold_runner.py"},
-    "mint":           {"needs_msa": False, "runner": "mint_runner.py"},
+    "mentos":         {"needs_msa": False, "runner": "mentos_runner.py"},
     "colabfold":      {"needs_msa": True,  "runner": "colabfold_runner.py"},
     "msa_pairformer": {"needs_msa": True,  "runner": "msa_pairformer_runner.py"},
 }

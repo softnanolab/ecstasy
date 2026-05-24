@@ -1,8 +1,11 @@
-benchmark: mint_seqid30
-model: msa_pairformer
+benchmark: mentos_seqid30
+model: esmfold
 data_root: /projects/u6jv/boltz_benchmarking/DATA
 
 model_config:
   env_path: /home/u6jv/harsh.u6jv/ecstasy/envs/.venv-esmfold
-  max_msa_depth: 512
+  num_recycles: 4
+  chain_linker_length: 25
+  contact_cutoff_bin: 19
+  chunk_size: 64
   predict_limit: 1

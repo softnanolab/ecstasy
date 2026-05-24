@@ -32,7 +32,7 @@ def _adapter_overrides(model_config: str | None, model_weights: str | None) -> d
     """Build adapter-config overrides from generic CLI flags.
 
     --model_config / --model_weights are accepted for adapters whose model definition
-    is data-driven (e.g., MINT, where weights and config vary per experiment). They
+    is data-driven (e.g., MENTOS, where weights and config vary per experiment). They
     land under cfg["model_config"]["model_config_path"] and cfg["model_config"]["model_weights_path"].
     Adapters that ignore them are unaffected.
     """

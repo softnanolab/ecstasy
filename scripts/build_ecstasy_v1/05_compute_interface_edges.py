@@ -1,6 +1,6 @@
 """Compute Pinder-style interface-coverage edges from Foldseek hits.
 
-For each Foldseek hit (candidate_chain, mint_train_chain):
+For each Foldseek hit (candidate_chain, mentos_train_chain):
   - look up the candidate chain's interface residues from dimers.parquet
   - coverage = |I_candidate ∩ [qstart..qend]| / |I_candidate|
   - keep the hit if coverage >= 0.5 (Pinder GraphConfig default)

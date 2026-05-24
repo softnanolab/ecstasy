@@ -3,9 +3,9 @@
 This venv hosts:
   - torch (cu124) + CUDA at runtime
   - boltz (softnanolab/boltz feat/extract-distogram-2.2.1)
-  - mint (single-sequence contact-prediction model)
-  - omegaconf (used by the MINT runner to load Hydra configs)
-  - ecstasy (so the boltz/mint runners can `import ecstasy.*` if needed)
+  - mentos (single-sequence contact-prediction model)
+  - omegaconf (used by the MENTOS runner to load Hydra configs)
+  - ecstasy (so the boltz/mentos runners can `import ecstasy.*` if needed)
 
 The torch+CUDA test will fail on a login node (no GPU); it is expected to run
 on a compute node inside the sbatch driver.
@@ -38,12 +38,12 @@ def test_boltz_venv_boltz_import(run_in_venv):
 
 
 @pytest.mark.installation
-def test_boltz_venv_mint_import(run_in_venv):
+def test_boltz_venv_mentos_import(run_in_venv):
     r = run_in_venv("boltz", [
-        "import mint",
-        "from mint.data.esm import Alphabet",
+        "import mentos",
+        "from mentos.data.esm import Alphabet",
         "a = Alphabet.from_architecture('ESM-1b')",
-        "print('mint Alphabet size:', len(a))",
+        "print('mentos Alphabet size:', len(a))",
     ])
     assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
 

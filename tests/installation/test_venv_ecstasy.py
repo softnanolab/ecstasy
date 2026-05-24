@@ -14,8 +14,8 @@ def test_ecstasy_venv_cli_imports(run_in_venv):
         "from ecstasy.models import MODELS",
         "print('benchmarks:', sorted(BENCHMARKS))",
         "print('models:', sorted(MODELS))",
-        "assert 'mint_seqid30' in BENCHMARKS",
-        "assert set(MODELS) >= {'boltz2', 'mint', 'esmfold', 'colabfold', 'msa_pairformer'}",
+        "assert 'mentos_seqid30' in BENCHMARKS",
+        "assert set(MODELS) >= {'boltz2', 'mentos', 'esmfold', 'colabfold', 'msa_pairformer'}",
     ])
     assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
 
@@ -42,6 +42,6 @@ def test_ecstasy_cli_bench_list(venvs):
         pytest.skip(f"ecstasy console script not found at {ecstasy_bin}")
     r = subprocess.run([str(ecstasy_bin), "bench", "list"], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
-    assert "mint_seqid30" in r.stdout
-    for model in ("boltz2", "mint", "esmfold", "colabfold", "msa_pairformer"):
+    assert "mentos_seqid30" in r.stdout
+    for model in ("boltz2", "mentos", "esmfold", "colabfold", "msa_pairformer"):
         assert model in r.stdout, f"model {model!r} not in `ecstasy bench list` output: {r.stdout}"

@@ -1,4 +1,4 @@
-"""Run Foldseek easy-search: candidate chains vs MINT-train chains.
+"""Run Foldseek easy-search: candidate chains vs MENTOS-train chains.
 
 Uses --threads from SLURM_CPUS_PER_TASK if available (else 16).
 Output format: query target lddt qstart qend qlen tstart tend tlen alnlen evalue
@@ -17,7 +17,7 @@ CANDIDATES_DIR = Path(
     "/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/candidates/chains"
 )
 TRAIN_DIR = Path(
-    "/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/train_db/mint_train_chains"
+    "/projects/u6jv/ecstasy/benchmarks/ecstasy_v1/train_db/mentos_train_chains"
 )
 OUT_ROOT = Path("/projects/u6jv/ecstasy/benchmarks/ecstasy_v1")
 DB_DIR = OUT_ROOT / "foldseek_dbs"
@@ -45,25 +45,25 @@ def main() -> int:
     cand_count = len(list(CANDIDATES_DIR.glob("*.pdb")))
     train_count = len(list(TRAIN_DIR.glob("*.pdb")))
     print(f"Candidate chain PDBs: {cand_count}")
-    print(f"MINT-train chain PDBs: {train_count}")
+    print(f"MENTOS-train chain PDBs: {train_count}")
     print(f"Threads:               {NTHREADS}")
     if cand_count == 0 or train_count == 0:
         print("ERROR: empty input dir", file=sys.stderr)
         return 1
 
     cand_db = DB_DIR / "candidates_db"
-    train_db = DB_DIR / "mint_train_db"
+    train_db = DB_DIR / "mentos_train_db"
 
     if not (DB_DIR / "candidates_db").exists():
         run([str(FOLDSEEK), "createdb", str(CANDIDATES_DIR), str(cand_db),
              "--threads", str(NTHREADS)])
     else:
         print(f"  reusing existing candidates DB at {cand_db}")
-    if not (DB_DIR / "mint_train_db").exists():
+    if not (DB_DIR / "mentos_train_db").exists():
         run([str(FOLDSEEK), "createdb", str(TRAIN_DIR), str(train_db),
              "--threads", str(NTHREADS)])
     else:
-        print(f"  reusing existing MINT-train DB at {train_db}")
+        print(f"  reusing existing MENTOS-train DB at {train_db}")
 
     if TMP_DIR.exists():
         shutil.rmtree(TMP_DIR)
