@@ -322,16 +322,14 @@ def apply_save_msa_filters(
                 stats.filtered_id += 1
                 continue
             if filters.max_genomic_distance is not None:
-                # We need UniRef IDs on every chain side to compute genomic distance;
-                # without them, the row has no operon evidence — drop to mirror
-                # genomic_distance=1 strictness.
-                if not all(e.has_uniref and e.uid for e in entries):
-                    stats.filtered_dist += 1
-                    continue
-                dists = _calc_distances([e.uniprot_num for e in entries])
-                if dists and dists[0] != -1 and dists[0] > filters.max_genomic_distance:
-                    stats.filtered_dist += 1
-                    continue
+                # Notebook save_msa applies the genomic-distance (operon-proximity) test
+                # ONLY to rows with a UniRef accession on every chain. Rows lacking UniRef
+                # have no operon evidence and are KEPT (not dropped) — matching the notebook.
+                if all(e.has_uniref and e.uid for e in entries):
+                    dists = _calc_distances([e.uniprot_num for e in entries])
+                    if dists and dists[0] != -1 and dists[0] > filters.max_genomic_distance:
+                        stats.filtered_dist += 1
+                        continue
         header = "|".join(e.header for e in entries) if not entries[0].is_query else "query"
         kept.append((header, "".join(seqs)))
         stats.kept += 1
