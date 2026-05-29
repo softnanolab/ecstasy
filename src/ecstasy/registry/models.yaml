@@ -23,9 +23,11 @@ esmfold:
   runner: esmfold_runner.py
   env: ${ENVS_ROOT}/.venv-esmfold
   msa: none
-  default_preset: full
+  default_preset: glinker32
   presets:
-    full: {num_recycles: 4, chain_linker_length: 25, contact_cutoff_bin: 19}
+    # 32-residue poly-G linker + 512 positional-index skip between chains (multimer hack)
+    glinker32: {num_recycles: 4, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
+    full: {num_recycles: 4, chain_linker_length: 25, residue_index_offset: 512, contact_cutoff_bin: 19}
 
 mentos:
   runner: mentos_runner.py
