@@ -71,6 +71,69 @@ def submit_pair(
     raise RuntimeError("submit retries exhausted")
 
 
+def submit_msa(
+    session: requests.Session,
+    fasta: str,
+    *,
+    mode: str = "env",
+    max_retries: int = MAX_RETRIES,
+) -> str:
+    """POST a single-sequence FASTA to /ticket/msa; return the server job id.
+
+    Unpaired MSA (uniref + env), used for homodimer tiling. Mirrors submit_pair.
+    """
+    for attempt in range(max_retries):
+        try:
+            r = session.post(f"{HOST}/ticket/msa", data={"q": fasta, "mode": mode},
+                             timeout=SUBMIT_TIMEOUT_S)
+            if r.status_code == 429:
+                time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
+                continue
+            r.raise_for_status()
+            j = r.json()
+            if "id" not in j:
+                raise RuntimeError(f"no id in submit response: {j}")
+            return j["id"]
+        except requests.RequestException as e:
+            if attempt == max_retries - 1:
+                raise RuntimeError(f"submit_msa failed: {e}")
+            time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
+    raise RuntimeError("submit_msa retries exhausted")
+
+
+def parse_unpaired_a3m_bytes(tar_bytes: bytes) -> list[str]:
+    """Extract uniref.a3m (+ bfd…a3m) from the /ticket/msa tarball; matched-only seqs.
+
+    Returns deduped matched-only (insertions stripped) sequences, query first.
+    Used to tile a homodimer's paired MSA from its single-chain alignment.
+    """
+    names = ("uniref.a3m", "bfd.mgnify30.metaeuk30.smag30.a3m")
+    seqs: list[str] = []
+    seen: set[str] = set()
+    with tarfile.open(fileobj=BytesIO(tar_bytes), mode="r:gz") as tf:
+        members = {m.name.split("/")[-1]: m for m in tf.getmembers()}
+        for nm in names:
+            m = members.get(nm)
+            if m is None:
+                continue
+            text = tf.extractfile(m).read().decode("utf-8", errors="replace")
+            cur: list[str] = []
+            for line in text.splitlines():
+                if line.startswith(">"):
+                    if cur:
+                        s = _strip_inserts("".join(cur))
+                        if s and s not in seen:
+                            seen.add(s); seqs.append(s)
+                    cur = []
+                elif line:
+                    cur.append(line.rstrip())
+            if cur:
+                s = _strip_inserts("".join(cur))
+                if s and s not in seen:
+                    seen.add(s); seqs.append(s)
+    return seqs
+
+
 def poll_until_done(
     session: requests.Session,
     job_id: str,

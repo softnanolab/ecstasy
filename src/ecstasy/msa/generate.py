@@ -56,6 +56,8 @@ def prepare(datasets: list[str], kind: str) -> Path:
     """Write a FASTA of store-missing chains/complexes; print the colabfold command."""
     if kind == "boltz_csv":
         return prepare_boltz_csv(datasets)
+    if kind == "complex":
+        return prepare_complex(datasets)
     store_dir = store.per_chain_dir() if kind == "per_chain" else store.complex_dir()
     store_dir.mkdir(parents=True, exist_ok=True)
     items = _collect(datasets, kind)
@@ -84,6 +86,9 @@ def submit(datasets: list[str], kind: str) -> str | None:
     """prepare(), then sbatch colabfold-local's MSA job over the missing FASTA."""
     if kind == "boltz_csv":
         return submit_boltz_csv(datasets)
+    if kind == "complex":
+        fetch_complex(datasets)   # faithful colabfold-API fetch (runs inline; needs network)
+        return None
     fasta = prepare(datasets, kind)
     out = _work_dir(kind) / "out"
     script = COLABFOLD_LOCAL / "scripts" / "01_generate_msa.sh"
@@ -161,6 +166,12 @@ def ingest(datasets: list[str], kind: str, a3m_dir: str | None = None) -> None:
     """Copy colabfold output a3ms into the store, keyed by content hash."""
     if kind == "boltz_csv":
         return ingest_boltz_csv(datasets, out_dir=a3m_dir)
+    if kind == "complex":
+        # complex fetch writes straight to the store in `submit`; just report coverage
+        items = _collect(datasets, "complex")
+        have = sum(1 for v in items.values() if store.path_for_pair(v["seqs"]).exists())
+        print(f"[msa:complex] store coverage: {have}/{len(items)} complexes")
+        return None
     a3m_dir = Path(a3m_dir) if a3m_dir else _work_dir(kind) / "out"
     if not a3m_dir.exists():
         raise FileNotFoundError(f"no a3m dir at {a3m_dir} (run colabfold first)")
@@ -330,3 +341,85 @@ def ingest_boltz_csv(datasets: list[str], out_dir: str | None = None) -> None:
     if missing:
         print(f"[msa:boltz_csv] {missing} complexes absent from colabfold output "
               f"-> single-seq fallback at predict")
+
+
+# ---- complex: SI-faithful MSA Pairformer paired MSA via the ColabFold API -----
+#
+# Reproduces the MSA Pairformer notebook/SI MMseqs2 route (separate from boltz_csv):
+# heterodimer -> /ticket/pair paircomplete-pairfilterprox_20 -> save_msa filters
+# (coverage>=0.75, query-identity>=0.30, genomic-distance<=20) -> stitch.
+# homodimer (single unique chain) -> /ticket/msa unpaired -> tile each row (s|s).
+# Depth cap (512, hhfilter) happens at model load in the runner, not here.
+# Needs network egress to api.colabfold.com (run on a login node, not a GPU node).
+
+from ecstasy.msa import colabfold as _cf
+
+
+def _complex_header_and_rows(session, seqs: list[str]) -> tuple[str, list[tuple[str, str]]]:
+    cleaned = [_cf.clean_sequence(s) for s in seqs]
+    lengths = ",".join(str(len(s)) for s in cleaned)
+    header = f"#{lengths}\t{','.join('1' for _ in cleaned)}"
+    uniq = list(dict.fromkeys(cleaned))
+    if len(uniq) == 1:
+        # homodimer/homo-oligomer: tile the single-chain unpaired MSA (user-chosen recipe)
+        jid = _cf.submit_msa(session, _cf.make_query_fasta([uniq[0]]), mode="env")
+        _cf.poll_until_done(session, jid)
+        chain_seqs = _cf.parse_unpaired_a3m_bytes(_cf.download_results(session, jid))
+        L = len(uniq[0])
+        n = len(cleaned)
+        rows = [("query" if i == 0 else f"hom{i}", s * n)
+                for i, s in enumerate(chain_seqs) if len(s) == L]
+        return header, rows
+    # heterodimer: paired prox_20 + save_msa filters + stitch
+    jid = _cf.submit_pair(session, _cf.make_query_fasta(cleaned), mode=_cf.DEFAULT_MODE)
+    _cf.poll_until_done(session, jid)
+    per_chain = _cf.parse_paired_a3m_bytes(_cf.download_results(session, jid), extract_metadata=True)
+    rows, _stats = _cf.apply_save_msa_filters(per_chain, [len(s) for s in cleaned], _cf.SaveMsaFilters())
+    return header, rows
+
+
+def prepare_complex(datasets: list[str]) -> Path:
+    """List store-missing complexes for the faithful colabfold-API paired MSA."""
+    store.complex_dir().mkdir(parents=True, exist_ok=True)
+    items = _collect(datasets, "complex")
+    missing = {h: v for h, v in items.items() if not store.path_for_pair(v["seqs"]).exists()}
+    work = _work_dir("complex"); work.mkdir(parents=True, exist_ok=True)
+    fasta = work / "missing.fasta"
+    with fasta.open("w") as f:
+        for h, v in sorted(missing.items()):
+            f.write(f">{v['header']}\n{v['query']}\n")
+    print(f"[msa:complex] datasets={datasets}")
+    print(f"[msa:complex] unique={len(items)} already_in_store={len(items)-len(missing)} missing={len(missing)}")
+    print(f"[msa:complex] wrote {fasta}; run --phase submit to fetch from api.colabfold.com (needs network)")
+    return fasta
+
+
+def fetch_complex(datasets: list[str]) -> None:
+    """Fetch+filter+stitch each missing complex from the ColabFold API into the store.
+
+    Resumable: skips complexes already present. Continues past per-complex errors.
+    """
+    import requests
+    items = _collect(datasets, "complex")
+    store.complex_dir().mkdir(parents=True, exist_ok=True)
+    missing = [(h, v) for h, v in sorted(items.items())
+               if not store.path_for_pair(v["seqs"]).exists()]
+    print(f"[msa:complex] fetching {len(missing)} of {len(items)} complexes from api.colabfold.com")
+    session = requests.Session()
+    done = errors = 0
+    for i, (h, v) in enumerate(missing, 1):
+        try:
+            header, rows = _complex_header_and_rows(session, v["seqs"])
+            dst = store.path_for_pair(v["seqs"])
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            with dst.open("w") as f:
+                f.write(header + "\n")
+                for hdr, seq in rows:
+                    f.write(f">{hdr}\n{seq}\n")
+            done += 1
+            if i % 25 == 0 or i == len(missing):
+                print(f"[msa:complex] {i}/{len(missing)} (last {h}: {len(rows)} rows)", flush=True)
+        except Exception as e:  # noqa: BLE001
+            errors += 1
+            print(f"[msa:complex] ERROR {h}: {e}", file=__import__('sys').stderr, flush=True)
+    print(f"[msa:complex] done: wrote={done} errors={errors}")
