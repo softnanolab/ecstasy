@@ -4,7 +4,7 @@ Reads a JSON bundle from stdin:
   { entry_id, sequences[], chain_ids[], msa_paths{} (per-chain a3m, optional),
     out_dir, config }
 
-Bundle's config["model_config"]:
+Bundle's "params":
   complex_a3m_dir   — optional. Directory of pre-generated complex a3ms in
                       ColabFold format (header `#L1,L2<TAB>copies1,copies2`).
                       If present and `<entry_id>.a3m` exists there, uses it.
@@ -55,15 +55,22 @@ def main():
     sequences: list[str] = bundle["sequences"]
     out_dir = Path(bundle["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    cfg = (bundle.get("config") or {}).get("model_config", {}) or {}
+    cfg = bundle.get("params") or {}
 
     max_msa_depth: int = int(cfg.get("max_msa_depth", 512))
     weights_dir = cfg.get("weights_dir")
     hhfilter_bin = cfg.get("hhfilter_bin")
+    # complex paired a3m: the pipeline resolves it from the shared MSA store and
+    # passes the path directly; fall back to a config dir, then single-sequence.
+    complex_a3m = bundle.get("complex_a3m") or cfg.get("complex_a3m")
     complex_a3m_dir = cfg.get("complex_a3m_dir")
 
     a3m_path: Path
-    if complex_a3m_dir:
+    if complex_a3m:
+        a3m_path = Path(complex_a3m)
+        if not a3m_path.exists():
+            raise FileNotFoundError(f"complex_a3m {a3m_path} missing — generate complex MSAs first.")
+    elif complex_a3m_dir:
         candidate = Path(complex_a3m_dir) / f"{entry_id}.a3m"
         if not candidate.exists():
             raise FileNotFoundError(

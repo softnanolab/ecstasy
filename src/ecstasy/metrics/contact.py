@@ -64,14 +64,3 @@ def pak_inter_chain(
     triu = np.triu_indices(L, k=1)
     inter = chain_ids[triu[0]] != chain_ids[triu[1]]
     return pak_from_pairs(contact_prob[triu][inter], contact_gt[triu][inter])
-
-
-def pak_inter_chain_rect(probs: np.ndarray, gt: np.ndarray) -> dict[str, float]:
-    """Interchain P@K on a rectangular (Na, Nb) prediction + GT.
-
-    Thin adapter around `pak_from_pairs`. Every entry is interchain by
-    construction (chain A vs chain B); no triu / chain-id selection needed.
-    Used by benchmarks that store rectangular interchain-only GT (e.g.
-    ecstasy_v1) instead of square (L, L) GT with intra-chain blocks.
-    """
-    return pak_from_pairs(probs, gt)

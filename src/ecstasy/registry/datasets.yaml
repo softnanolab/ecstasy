@@ -1,0 +1,32 @@
+# Evaluation datasets (interchain contact prediction). Rows, not classes.
+# ${VAR} expands against ecstasy.config.Settings (DATA_ROOT/MENTOS_ROOT/...).
+#   kind        loader class (mentos_square)
+#   index       split index parquet (has a `split` column + `sequences`)
+#   gt_root     per-entry ground-truth root (<gt_root>/<id[:2]>/<id>.pt)
+#   split       which split column value to evaluate (mentos_square)
+#   contact_bin Cβ-Cβ distance-bin threshold; bins < contact_bin are contacts
+
+_mentos: &mentos
+  kind: mentos_square
+  gt_root: ${MENTOS_ROOT}/pdb/processed/data
+  split: val
+  contact_bin: 5
+
+# MENTOS seq_id_30 val (legacy headline; 1,511 dimers)
+mentos_seqid30:
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/seq_id_30/index.parquet
+
+# Four leakage-controlled val splits (deleaking strategy in the comment)
+val_seq_chain:      # V1 MMseqs cluster @ 30% seq id, chain-level   (631)
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_chain/index.parquet
+val_seq_pair:       # V2 MMseqs cluster, pair identity              (945)
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
+val_pinder_chain:   # V3 depth-2 walk, fused interface-monomer graph (98)
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_chain/index.parquet
+val_pinder_pair:    # V4 LPA pair identity — headline               (474)
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_pair/index.parquet

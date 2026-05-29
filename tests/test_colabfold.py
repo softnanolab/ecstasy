@@ -1,8 +1,7 @@
 """Tests for ecstasy.msa.colabfold — parser + filters + UniProt encoding.
 
 The HTTP client (submit_pair / poll_until_done / download_results) is
-network-bound and tested via the build_ecstasy_v1 integration pipeline,
-not here.
+network-bound and exercised by the MSA-generation stage, not here.
 """
 from __future__ import annotations
 

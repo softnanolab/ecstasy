@@ -1,7 +1,7 @@
 """Tests for ecstasy.structure — generic Pinder-style chain + interface utils.
 
 The bigger building blocks (`download_cif_assembly`, `load_local_cif`) are
-network/IO-bound and tested as part of the build_ecstasy_v1 integration job;
+network/IO-bound and exercised in dataset-construction jobs, not here;
 this file pins the pure-numpy logic (`interface_residue_indices`,
 `enumerate_dimer_pairs`, `split_into_chains` indexing) that's easy to fixture.
 """

@@ -1,15 +1,10 @@
-"""Shared pytest fixtures for the GPU env + model-prediction smoke tests.
+"""Shared pytest fixtures.
 
-The suite runs from `.venv-ecstasy` — the lightweight orchestrator that hosts
-the `ecstasy` CLI, pytest, and the benchmark/pipeline code (no model deps).
-Each test either:
-  - subprocesses into a specific model venv via `<venv>/bin/python -c "..."`
-    to verify its packages can be imported (installation/), or
-  - invokes `ecstasy bench predict --config <smoke yaml>`, which itself spawns
-    the model's runner inside the appropriate venv (integration/).
-
-Tests use a per-test tmp DATA_ROOT so re-runs do not hit the
-contact.npz-already-exists skip in run_predict.
+Unit tests (test_registry, test_metrics, ...) run in any env with the ecstasy
+package importable. Integration smoke tests drive the `ecstasy` CLI, which spawns
+each model's runner inside the appropriate venv. Each integration test uses a
+per-test tmp DATA_ROOT (via the env var) so re-runs don't hit the
+contact.npz-already-exists skip.
 """
 from __future__ import annotations
 
@@ -28,7 +23,9 @@ VENVS: dict[str, Path] = {
     "esmfold":   REPO_ROOT / "envs" / ".venv-esmfold",
     "colabfold": REPO_ROOT / "envs" / ".venv-colabfold",
 }
-SMOKE_ENTRY_ID = "10jy"  # 286-residue homodimer; mentos_seqid30 val[0]
+
+# Default smoke dataset (small, single-sequence fallback works without MSAs).
+SMOKE_DATASET = "mentos_seqid30"
 
 
 @pytest.fixture(scope="session")
@@ -50,85 +47,64 @@ def _venv_python(name: str) -> Path:
 
 @pytest.fixture
 def run_in_venv():
-    """Run a Python snippet in a named venv; return CompletedProcess.
-
-    Usage:
-        r = run_in_venv("boltz", ["import torch", "print(torch.__version__)"])
-        assert r.returncode == 0, r.stderr
-    """
+    """Run a Python snippet in a named venv; return CompletedProcess."""
     def _run(name: str, statements: Iterable[str], timeout: int = 180) -> subprocess.CompletedProcess:
-        code = "\n".join(statements)
-        return subprocess.run(
-            [str(_venv_python(name)), "-c", code],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        return subprocess.run([str(_venv_python(name)), "-c", "\n".join(statements)],
+                              capture_output=True, text=True, timeout=timeout)
     return _run
 
 
 @pytest.fixture
-def smoke_config(tmp_path: Path, repo_root: Path):
-    """Materialize a smoke config under tmp_path with `data_root` overridden.
-
-    Returns a callable: smoke_config(model, extra={...}) -> Path.
-    """
-    import yaml
-
-    def _make(model: str, extra: dict | None = None) -> Path:
-        src = repo_root / "configs" / f"mentos_seqid30__{model}_smoke.yaml"
-        if not src.exists():
-            pytest.skip(f"smoke config missing: {src}")
-        cfg = yaml.safe_load(src.read_text())
-        data_root = tmp_path / "data_root"
-        data_root.mkdir(parents=True, exist_ok=True)
-        cfg["data_root"] = str(data_root)
-        if extra:
-            cfg.setdefault("model_config", {}).update(extra)
-        dst = tmp_path / f"{model}_smoke.yaml"
-        dst.write_text(yaml.safe_dump(cfg))
-        return dst
-    return _make
+def data_root(tmp_path: Path) -> Path:
+    d = tmp_path / "DATA"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 @pytest.fixture
-def run_ecstasy(repo_root: Path):
-    """Run `ecstasy bench <args>` in the current (pytest) venv.
+def run_ecstasy(repo_root: Path, data_root: Path):
+    """Run `ecstasy <args>` via the current venv's console script, DATA_ROOT=tmp.
 
-    Uses the venv's `ecstasy` console script. Returns CompletedProcess.
+    Pass venv="boltz" to use a specific venv's ecstasy (e.g. for `score`, which
+    needs torch + mentos to load the GT, absent from the orchestrator env).
     """
-    def _run(args: list[str], env: dict | None = None, timeout: int = 1800) -> subprocess.CompletedProcess:
-        ecstasy_bin = Path(sys.executable).parent / "ecstasy"
-        if not ecstasy_bin.exists():
-            pytest.fail(f"`ecstasy` not on this venv's PATH at {ecstasy_bin}")
-        merged_env = os.environ.copy()
-        if env:
-            merged_env.update(env)
-        return subprocess.run(
-            [str(ecstasy_bin), *args],
-            capture_output=True, text=True, timeout=timeout,
-            cwd=str(repo_root), env=merged_env,
-        )
+    def _run(args: list[str], venv: str | None = None, timeout: int = 1800) -> subprocess.CompletedProcess:
+        if venv:
+            ecstasy_bin = VENVS[venv] / "bin" / "ecstasy"
+            if not ecstasy_bin.exists():
+                pytest.skip(f"ecstasy CLI not found in venv {venv!r} at {ecstasy_bin}")
+        else:
+            ecstasy_bin = Path(sys.executable).parent / "ecstasy"
+            if not ecstasy_bin.exists():
+                pytest.fail(f"`ecstasy` not on this venv's PATH at {ecstasy_bin}")
+        env = {**os.environ, "DATA_ROOT": str(data_root)}
+        return subprocess.run([str(ecstasy_bin), *args], capture_output=True, text=True,
+                              timeout=timeout, cwd=str(repo_root), env=env)
     return _run
 
 
-def find_contact_npz(data_root: Path, model: str, entry_id: str = SMOKE_ENTRY_ID) -> Path | None:
-    """Locate <data_root>/ecstasy/benchmarks/mentos_seqid30/predictions/<model>/<run_id>/<entry_id>/contact.npz."""
-    pattern = f"ecstasy/benchmarks/mentos_seqid30/predictions/{model}/*/{entry_id}/contact.npz"
-    matches = list(Path(data_root).glob(pattern))
-    return matches[0] if matches else None
+def first_entry_id(dataset: str = SMOKE_DATASET) -> str:
+    from ecstasy.datasets import load_dataset
+    return next(iter(load_dataset(dataset).entries())).id
+
+
+def find_contact_npz(data_root: Path, dataset: str, model: str,
+                     variant: str, entry_id: str) -> Path | None:
+    p = (Path(data_root) / "ecstasy" / "runs" / dataset / model / variant
+         / "predictions" / entry_id / "contact.npz")
+    return p if p.exists() else None
 
 
 def assert_valid_contact_npz(path: Path, expected_L: int | None = None) -> None:
-    """Sanity-check a contact.npz: probs (L, L) finite in [0, 1]."""
     import numpy as np
-    assert path.exists(), f"contact.npz missing: {path}"
+    assert path and path.exists(), f"contact.npz missing: {path}"
     d = np.load(path)
     assert "probs" in d.files, f"no 'probs' in {path}: keys={d.files}"
     probs = np.asarray(d["probs"])
     assert probs.ndim == 2 and probs.shape[0] == probs.shape[1], \
-        f"probs not square (L,L); got shape {probs.shape}"
+        f"probs not square (L,L); got {probs.shape}"
     if expected_L is not None:
-        assert probs.shape[0] == expected_L, \
-            f"probs shape {probs.shape} != expected ({expected_L}, {expected_L})"
+        assert probs.shape[0] == expected_L
     assert np.isfinite(probs).all(), "non-finite values in probs"
     pmin, pmax = float(probs.min()), float(probs.max())
     assert 0.0 <= pmin <= pmax <= 1.0 + 1e-3, f"probs not in [0,1]: min={pmin} max={pmax}"
