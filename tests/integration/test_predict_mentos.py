@@ -1,38 +1,29 @@
-"""End-to-end smoke: `ecstasy bench predict` for mentos (single-sequence).
+"""End-to-end smoke: `ecstasy run` for mentos (single-sequence, --limit 1).
 
-MENTOS requires a Hydra config + Lightning checkpoint. The smoke sbatch uses
-the AFDD-pretrained 8M_35M run; we default to the same paths but allow
-override via env vars MENTOS_CFG / MENTOS_WTS. Test skips if neither is reachable.
+The default `pretrain_8m_35m` preset in registry/models.yaml points at a Hydra
+config + Lightning checkpoint; skip if those aren't reachable on this machine.
 """
-import os
 from pathlib import Path
 
 import pytest
 
+from tests.conftest import SMOKE_DATASET
 from tests.integration._common import assert_predict_succeeded
 
-MENTOS_CFG_DEFAULT = "/projects/u6jv/harsh/MENTOS_META/LOGS/MINT_AFDD_PRETRAIN_8M_35M/3khmvobe/config.yaml"
-MENTOS_WTS_DEFAULT = "/projects/u6jv/harsh/MENTOS_META/LOGS/MINT_AFDD_PRETRAIN_8M_35M/3khmvobe/checkpoints/last.ckpt"
 
-
-def _mentos_paths():
-    cfg = os.environ.get("MENTOS_CFG", MENTOS_CFG_DEFAULT)
-    wts = os.environ.get("MENTOS_WTS", MENTOS_WTS_DEFAULT)
-    if not Path(cfg).exists():
-        pytest.skip(f"MENTOS config not found at {cfg} (override with MENTOS_CFG=...)")
-    if not Path(wts).exists():
-        pytest.skip(f"MENTOS weights not found at {wts} (override with MENTOS_WTS=...)")
-    return cfg, wts
+def _skip_if_weights_missing():
+    from ecstasy.models import load_model
+    p = load_model("mentos").params
+    for key in ("model_config_path", "model_weights_path"):
+        if not Path(p[key]).exists():
+            pytest.skip(f"mentos {key} not found at {p[key]}")
 
 
 @pytest.mark.integration
 @pytest.mark.gpu
 @pytest.mark.model_mentos
-def test_predict_mentos(smoke_config, run_ecstasy):
-    mentos_cfg, mentos_wts = _mentos_paths()
-    cfg = smoke_config("mentos", extra={
-        "model_config_path": mentos_cfg,
-        "model_weights_path": mentos_wts,
-    })
-    r = run_ecstasy(["bench", "predict", "--config", str(cfg)], timeout=900)
-    assert_predict_succeeded(r, cfg, "mentos")
+def test_predict_mentos(run_ecstasy, data_root):
+    _skip_if_weights_missing()
+    r = run_ecstasy(["run", "--dataset", SMOKE_DATASET, "--model", "mentos",
+                     "--limit", "1", "--no_score"], timeout=900)
+    assert_predict_succeeded(r, data_root, SMOKE_DATASET, "mentos", variant="pretrain_8m_35m")

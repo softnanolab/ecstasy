@@ -3,7 +3,7 @@
 Reads a JSON bundle from stdin:
   { entry_id, sequences[], chain_ids[], msa_paths{} (ignored), out_dir, config }
 
-Bundle's config["model_config"] (all optional):
+Bundle's "params" (all optional):
   num_recycles        — recycle iterations (default ESMFold's 4)
   chain_linker_length — linker residues between chains (default 25, ESMFold default)
   chunk_size          — axial-attention chunk; reduces memory at small wallclock cost
@@ -34,7 +34,7 @@ def main():
     sequences: list[str] = bundle["sequences"]
     out_dir = Path(bundle["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    cfg = (bundle.get("config") or {}).get("model_config", {}) or {}
+    cfg = bundle.get("params") or {}
 
     cutoff_bin: int = int(cfg.get("contact_cutoff_bin", 19))
     chain_linker_len: int = int(cfg.get("chain_linker_length", 25))

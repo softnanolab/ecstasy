@@ -3,7 +3,7 @@
 Reads a JSON bundle from stdin:
   { entry_id, sequences[], chain_ids[], msa_paths{} (ignored), out_dir, config }
 
-Bundle's config["model_config"] must contain:
+Bundle's "params" must contain:
   model_config_path  — path to a MENTOS (Hydra/OmegaConf) YAML config used to
                        instantiate the ContactPrediction LightningModule.
   model_weights_path — path to a Lightning .ckpt (or .pt) of trained weights.
@@ -61,15 +61,15 @@ def main():
     sequences: list[str] = bundle["sequences"]
     out_dir = Path(bundle["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    cfg = (bundle.get("config") or {}).get("model_config", {}) or {}
+    cfg = bundle.get("params") or {}
 
     model_config_path = cfg.get("model_config_path")
     model_weights_path = cfg.get("model_weights_path")
     if not model_config_path or not model_weights_path:
         raise ValueError(
-            "mentos adapter requires --model_config <yaml> and --model_weights <ckpt>"
+            "mentos preset must set model_config_path and model_weights_path"
         )
-    cutoff_bin: int = int(cfg.get("contact_threshold_bin", 5))
+    cutoff_bin: int = int(cfg.get("contact_cutoff_bin", 5))
 
     from omegaconf import OmegaConf
     import mentos

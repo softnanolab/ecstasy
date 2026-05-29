@@ -1,7 +1,9 @@
 """Self-contained Boltz-2 runner — invoked via env's python from the outer adapter.
 
 Reads a JSON bundle from stdin:
-  { entry_id, sequences[], chain_ids[], msa_paths{chain_id: path}, out_dir, config }
+  { entry_id, sequences[], chain_ids[], msa_paths{chain_id: path}, out_dir,
+    params{recycling_steps, sampling_steps, diffusion_samples, contact_cutoff_bin},
+    infra{devices, num_workers, no_kernels} }
 
 Writes:
   <out_dir>/raw/                                — boltz native outputs (mmcif + distogram_<id>.npz)
@@ -54,7 +56,8 @@ def main():
     chain_ids: list[str] = bundle["chain_ids"]
     msa_paths: dict[str, str] = bundle.get("msa_paths") or {}
     out_dir = Path(bundle["out_dir"])
-    cfg = (bundle.get("config") or {}).get("model_config", {}) or {}
+    cfg = bundle.get("params") or {}        # output-affecting params (preset + overrides)
+    infra = bundle.get("infra") or {}       # machine knobs (devices/num_workers/no_kernels)
     cutoff_bin: int = int(cfg.get("contact_cutoff_bin", 19))
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -70,16 +73,16 @@ def main():
         str(boltz_bin), "predict", str(yaml_dir),
         "--out_dir", str(raw_dir),
         "--model", "boltz2",
-        "--devices", str(cfg.get("devices", 1)),
+        "--devices", str(infra.get("devices", 1)),
         "--recycling_steps", str(cfg.get("recycling_steps", 3)),
         "--sampling_steps", str(cfg.get("sampling_steps", 25)),
         "--diffusion_samples", str(cfg.get("diffusion_samples", 1)),
-        "--num_workers", str(cfg.get("num_workers", 0)),
+        "--num_workers", str(infra.get("num_workers", 0)),
         "--output_format", "mmcif",
         "--override",
         "--dump_distogram",
     ]
-    if cfg.get("no_kernels", True):
+    if infra.get("no_kernels", True):
         cmd.append("--no_kernels")
     print("RUN:", " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True)

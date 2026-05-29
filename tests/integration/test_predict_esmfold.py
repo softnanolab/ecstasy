@@ -1,16 +1,14 @@
-"""End-to-end smoke: `ecstasy bench predict` for ESMFold (single-sequence).
-
-ESMFold downloads weights on first use (~3 GB). Allow longer timeout.
-"""
+"""End-to-end smoke: `ecstasy run` for esmfold (single-sequence, --limit 1)."""
 import pytest
 
+from tests.conftest import SMOKE_DATASET
 from tests.integration._common import assert_predict_succeeded
 
 
 @pytest.mark.integration
 @pytest.mark.gpu
 @pytest.mark.model_esmfold
-def test_predict_esmfold(smoke_config, run_ecstasy):
-    cfg = smoke_config("esmfold")
-    r = run_ecstasy(["bench", "predict", "--config", str(cfg)], timeout=1800)
-    assert_predict_succeeded(r, cfg, "esmfold")
+def test_predict_esmfold(run_ecstasy, data_root):
+    r = run_ecstasy(["run", "--dataset", SMOKE_DATASET, "--model", "esmfold",
+                     "--limit", "1", "--no_score"], timeout=900)
+    assert_predict_succeeded(r, data_root, SMOKE_DATASET, "esmfold", variant="full")

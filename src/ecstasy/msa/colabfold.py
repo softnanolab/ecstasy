@@ -9,12 +9,7 @@ integration. This module is the canonical home for:
   - notebook-style ``save_msa`` post-filters (coverage, identity,
     genomic distance — see ``apply_save_msa_filters``)
 
-Used by:
-  - ``scripts/build_ecstasy_v1/08_fetch_msas_colabfold.py``  (server fetch)
-  - ``scripts/build_ecstasy_v1/11_apply_notebook_filters.py``  (post-filter
-    on cached raw tarballs)
-
-Future benchmarks that need paired MSAs from the ColabFold server should
+Future datasets that need paired MSAs from the ColabFold server should
 import this module rather than re-implementing the parser.
 """
 from __future__ import annotations

@@ -1,89 +1,90 @@
-"""ecstasy CLI entry point: `ecstasy bench <subcmd> --config <yaml>`."""
+"""ecstasy CLI — datasets × models, driven by registries, CLI matrix, or a manifest.
+
+  ecstasy list
+  ecstasy msa     --datasets D[,D] --kind per_chain|complex [--phase prepare|submit|ingest] [--a3m_dir DIR]
+  ecstasy run     --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N] [--no_score]
+  ecstasy score   --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N]
+  ecstasy compare --dataset D
+  ecstasy experiment <manifest.yaml> [--limit N] [--no_score]
+
+`--set` takes a dict, e.g. `--set '{recycling_steps: 5}'`. `--limit 1` is the smoke;
+`--limit 0` with `experiment` is a dry materialization (lists runs, executes nothing).
+"""
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import fire
-import yaml
 
-from ecstasy.benchmarks import load_benchmark, BENCHMARKS
-from ecstasy.models import load_model, MODELS
-
-
-def _read_config(config: str) -> dict:
-    cfg = yaml.safe_load(Path(config).read_text())
-    cfg.setdefault("data_root", os.environ.get("DATA_ROOT"))
-    if not cfg.get("data_root"):
-        raise ValueError("data_root not set: either set DATA_ROOT env or add data_root: to the config")
-    return cfg
+from ecstasy.datasets import dataset_names
+from ecstasy.models import model_names, presets_for, load_model
+from ecstasy import pipeline, experiment
 
 
-def _materialize(config: str, overrides: dict | None = None):
-    cfg = _read_config(config)
-    if overrides:
-        cfg.setdefault("model_config", {}).update(overrides)
-    bench = load_benchmark(cfg["benchmark"], data_root=Path(cfg["data_root"]))
-    model = load_model(cfg["model"], config=cfg)
-    return cfg, bench, model
+def _as_list(x) -> list[str]:
+    if x is None:
+        return []
+    if isinstance(x, (list, tuple)):
+        return [str(i) for i in x]
+    return [s for s in str(x).split(",") if s]
 
 
-def _adapter_overrides(model_config: str | None, model_weights: str | None) -> dict | None:
-    """Build adapter-config overrides from generic CLI flags.
-
-    --model_config / --model_weights are accepted for adapters whose model definition
-    is data-driven (e.g., MENTOS, where weights and config vary per experiment). They
-    land under cfg["model_config"]["model_config_path"] and cfg["model_config"]["model_weights_path"].
-    Adapters that ignore them are unaffected.
-    """
-    out: dict = {}
-    if model_config:
-        out["model_config_path"] = model_config
-    if model_weights:
-        out["model_weights_path"] = model_weights
-    return out or None
+def _matrix(dataset, model, preset, overrides):
+    for d in _as_list(dataset):
+        for m in _as_list(model):
+            yield pipeline.make_run(d, m, preset=preset, overrides=overrides)
 
 
-class _Bench:
-    """`ecstasy bench <subcmd>` — run benchmark stages."""
-
+class Ecstasy:
     def list(self):
-        print("benchmarks:", sorted(BENCHMARKS))
-        print("models:    ", sorted(MODELS))
+        """Show registered datasets, models, and their presets."""
+        print("datasets:")
+        for d in dataset_names():
+            print(f"  {d}")
+        print("models:")
+        for m in model_names():
+            mr = load_model(m)
+            print(f"  {m:16} msa={mr.msa:9} env={mr.env.name:14} presets={presets_for(m)}")
 
-    def msa(self, config: str, model_config: str | None = None, model_weights: str | None = None):
-        cfg, bench, model = _materialize(config, _adapter_overrides(model_config, model_weights))
-        if not model.needs_msa:
-            print(f"{model.name}: needs_msa=False, skipping")
-            return
-        from ecstasy.pipelines import contact_prediction
-        contact_prediction.run_msa(cfg, bench, model)
+    def msa(self, datasets, kind, phase="prepare", a3m_dir=None):
+        """Populate the shared MSA store via colabfold-local.
 
-    def predict(self, config: str, submit: bool = False,
-                model_config: str | None = None, model_weights: str | None = None):
-        cfg, bench, model = _materialize(config, _adapter_overrides(model_config, model_weights))
-        from ecstasy.pipelines import contact_prediction
-        contact_prediction.run_predict(cfg, bench, model, submit=submit)
+        phase: prepare (write missing-chains FASTA), submit (sbatch colabfold),
+               or ingest (copy resulting a3ms into the store).
+        """
+        from ecstasy.msa import generate
+        ds = _as_list(datasets)
+        if phase == "prepare":
+            generate.prepare(ds, kind)
+        elif phase == "submit":
+            generate.submit(ds, kind)
+        elif phase == "ingest":
+            generate.ingest(ds, kind, a3m_dir=a3m_dir)
+        else:
+            raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
-    def score(self, config: str,
-              model_config: str | None = None, model_weights: str | None = None):
-        cfg, bench, model = _materialize(config, _adapter_overrides(model_config, model_weights))
-        from ecstasy.pipelines import contact_prediction
-        contact_prediction.run_score(cfg, bench, model)
+    def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False):
+        """Predict (and score, unless --no_score) over the dataset×model matrix."""
+        for r in _matrix(dataset, model, preset, set):
+            print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
+            pipeline.run_predict(r, limit=limit)
+            if not no_score:
+                pipeline.run_score(r, limit=limit)
 
-    def all(self, config: str, submit: bool = False,
-            model_config: str | None = None, model_weights: str | None = None):
-        self.msa(config, model_config=model_config, model_weights=model_weights)
-        self.predict(config, submit=submit, model_config=model_config, model_weights=model_weights)
-        self.score(config, model_config=model_config, model_weights=model_weights)
+    def score(self, dataset, model, preset=None, set=None, limit=None):
+        """Score existing predictions over the dataset×model matrix."""
+        for r in _matrix(dataset, model, preset, set):
+            pipeline.run_score(r, limit=limit)
 
-    def compare(self, task: str, data_root: str | None = None):
-        from ecstasy.pipelines import contact_prediction
-        contact_prediction.run_compare(task=task, data_root=Path(data_root or os.environ["DATA_ROOT"]))
+    def compare(self, dataset):
+        """Aggregate all runs for a dataset into comparison.{csv,md}."""
+        pipeline.run_compare(dataset)
+
+    def experiment(self, manifest, limit=None, no_score=False):
+        """Run a dataset×model sweep from a manifest YAML."""
+        experiment.run_experiment(manifest, limit=limit, score=not no_score)
 
 
 def main():
-    fire.Fire({"bench": _Bench()})
+    fire.Fire(Ecstasy())
 
 
 if __name__ == "__main__":

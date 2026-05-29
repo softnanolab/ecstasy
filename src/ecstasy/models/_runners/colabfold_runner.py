@@ -3,7 +3,7 @@
 Reads a JSON bundle from stdin:
   { entry_id, sequences[], chain_ids[], msa_paths{} (optional), out_dir, config }
 
-Bundle's config["model_config"]:
+Bundle's "params":
   msa_mode      — "single_sequence" | "mmseqs2_uniref_env" | "mmseqs2_uniref"
                   Default: single_sequence (smoke); for the with-MSA column use
                   mmseqs2_uniref_env which hits api.colabfold.com unless the
@@ -67,7 +67,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = out_dir / "raw"
     raw_dir.mkdir(exist_ok=True)
-    cfg = (bundle.get("config") or {}).get("model_config", {}) or {}
+    cfg = bundle.get("params") or {}
 
     msa_mode: str = cfg.get("msa_mode", "single_sequence")
     num_recycle: int = int(cfg.get("num_recycle", 3))

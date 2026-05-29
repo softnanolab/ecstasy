@@ -1,0 +1,56 @@
+# Models (contact predictors). Rows + named presets, not per-run configs.
+# ${VAR} expands against ecstasy.config.Settings.
+#   runner          script under models/_runners/ run inside `env`
+#   env             venv whose bin/python executes the runner
+#   msa             none | per_chain (unpaired, by seq-hash) | complex (paired, by pair-hash)
+#   infra           machine knobs that do NOT affect outputs (excluded from the variant id)
+#   default_preset  preset used when --preset is omitted
+#   presets         named output-affecting parameter sets; pick by name, tweak with --set
+
+boltz2:
+  runner: boltz2_runner.py
+  env: ${ENVS_ROOT}/.venv-boltz
+  msa: per_chain
+  infra: {num_workers: 0, devices: 1, no_kernels: true}
+  default_preset: full
+  presets:
+    full: {recycling_steps: 3, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    fast: {recycling_steps: 1, sampling_steps: 10, diffusion_samples: 1, contact_cutoff_bin: 19}
+
+esmfold:
+  runner: esmfold_runner.py
+  env: ${ENVS_ROOT}/.venv-esmfold
+  msa: none
+  default_preset: full
+  presets:
+    full: {num_recycles: 4, chain_linker_length: 25, contact_cutoff_bin: 19}
+
+mentos:
+  runner: mentos_runner.py
+  env: ${ENVS_ROOT}/.venv-boltz          # where the mentos package is installed editable
+  msa: none
+  default_preset: pretrain_8m_35m
+  presets:
+    pretrain_8m_35m:
+      model_config_path: /projects/u6jv/harsh/MENTOS_META/LOGS/MINT_AFDD_PRETRAIN_8M_35M/3khmvobe/config.yaml
+      model_weights_path: /projects/u6jv/harsh/MENTOS_META/LOGS/MINT_AFDD_PRETRAIN_8M_35M/3khmvobe/checkpoints/last.ckpt
+      contact_cutoff_bin: 5
+
+msa_pairformer:
+  runner: msa_pairformer_runner.py
+  env: ${ENVS_ROOT}/.venv-esmfold
+  msa: complex
+  default_preset: full
+  presets:
+    full:
+      max_msa_depth: 512
+      weights_dir: ${ECSTASY_ROOT}/weights/msa_pairformer
+      hhfilter_bin: ${TOOLS_ROOT}/hhsuite/bin/hhfilter
+
+colabfold:
+  runner: colabfold_runner.py
+  env: ${ENVS_ROOT}/.venv-colabfold
+  msa: per_chain
+  default_preset: single_seq
+  presets:
+    single_seq: {msa_mode: single_sequence, num_recycle: 3, contact_cutoff_bin: 19}

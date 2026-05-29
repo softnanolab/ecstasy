@@ -1,35 +1,27 @@
-"""Shared helpers for integration tests."""
+"""Shared helpers for integration smoke tests (new run layout)."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-import yaml
 
 
-def read_smoke_data_root(smoke_yaml_path: Path) -> Path:
-    """Read the data_root that the smoke-config fixture wrote."""
-    cfg = yaml.safe_load(smoke_yaml_path.read_text())
-    return Path(cfg["data_root"])
-
-
-def assert_predict_succeeded(completed, smoke_yaml_path: Path, model: str):
-    """After `ecstasy bench predict`, verify the subprocess exited 0 and
-    a valid contact.npz appeared at the expected location."""
-    from tests.conftest import find_contact_npz, assert_valid_contact_npz, SMOKE_ENTRY_ID
+def assert_predict_succeeded(completed, data_root: Path, dataset: str, model: str,
+                             variant: str = "full"):
+    """After `ecstasy run ... --limit 1`, verify rc==0 and a valid contact.npz
+    appeared for the dataset's first entry under runs/<dataset>/<model>/<variant>/."""
+    from tests.conftest import find_contact_npz, assert_valid_contact_npz, first_entry_id
 
     if completed.returncode != 0:
         pytest.fail(
-            f"ecstasy bench predict failed (rc={completed.returncode})\n"
-            f"--- STDOUT ---\n{completed.stdout}\n"
-            f"--- STDERR ---\n{completed.stderr}"
+            f"ecstasy run failed (rc={completed.returncode})\n"
+            f"--- STDOUT ---\n{completed.stdout}\n--- STDERR ---\n{completed.stderr}"
         )
-
-    data_root = read_smoke_data_root(smoke_yaml_path)
-    npz = find_contact_npz(data_root, model, SMOKE_ENTRY_ID)
+    entry_id = first_entry_id(dataset)
+    npz = find_contact_npz(data_root, dataset, model, variant, entry_id)
     assert npz is not None, (
-        f"no contact.npz produced under {data_root}/ecstasy/benchmarks/mentos_seqid30/predictions/{model}/\n"
-        f"--- STDOUT ---\n{completed.stdout}\n--- STDERR ---\n{completed.stderr}"
+        f"no contact.npz under {data_root}/ecstasy/runs/{dataset}/{model}/{variant}/ "
+        f"for entry {entry_id}\n--- STDOUT ---\n{completed.stdout}\n--- STDERR ---\n{completed.stderr}"
     )
     assert_valid_contact_npz(npz)
     return npz

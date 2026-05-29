@@ -37,6 +37,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "ecstasy" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.txt", "*.md"]
+"ecstasy.registry" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

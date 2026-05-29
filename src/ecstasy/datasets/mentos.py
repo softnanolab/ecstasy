@@ -1,3 +1,11 @@
+"""MENTOS square-GT dataset loader (seq_id_30 + the four deleaked val splits).
+
+All MENTOS PDB-processed splits share one format: an ``index.parquet`` with a
+``split`` column and a ``sequences`` array per row, and per-entry ground truth
+at ``<gt_root>/<id[:2]>/<id>.pt`` holding a *square* (L, L) binned Cβ-Cβ distance
+map (-1 marks unresolved Cβ). One class serves every such split; the split is
+chosen by the registry row, not by subclassing.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -5,42 +13,40 @@ from typing import Iterable
 
 import numpy as np
 
-from ecstasy.benchmarks.base import Benchmark, Entry, register_benchmark
+from ecstasy.datasets.base import Dataset, Entry
 from ecstasy.metrics.contact import pak_inter_chain
 
 
-@register_benchmark
-class MentosSeqid30Bench(Benchmark):
-    name = "mentos_seqid30"
-    parquet = Path("/projects/u6jv/public/MENTOS/DATA/pdb/processed/splits/seq_id_30/index.parquet")
-    gt_root = Path("/projects/u6jv/public/MENTOS/DATA/pdb/processed/data")
-    split = "val"
+class MentosSquareDataset(Dataset):
+    kind = "mentos_square"
+
+    def __init__(self, name: str, index: str, gt_root: str, split: str = "val",
+                 contact_bin: int = 5):
+        super().__init__(name)
+        self.index = Path(index)
+        self.gt_root = Path(gt_root)
+        self.split = split
+        self.contact_bin = int(contact_bin)
 
     def entries(self) -> Iterable[Entry]:
         import pandas as pd
-        df = pd.read_parquet(self.parquet)
+
+        df = pd.read_parquet(self.index)
         df = df[df["split"] == self.split]
         for row in df.itertuples():
             seqs = tuple(row.sequences)
             chain_ids = tuple(["A", "B"][: len(seqs)])
             yield Entry(id=str(row.id), sequences=seqs, chain_ids=chain_ids)
 
-    # MENTOS stores `contact_map` as a binned distance index in [0, 9] over edges
-    # [4, 5, 6, 7, 8, 9, 10, 11, 12]. Bins 0-4 (< 8 Å Cβ-Cβ) are "contacts".
-    contact_threshold_bin: int = 5
-
     def gt_for(self, entry_id: str) -> dict:
         import torch
+
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
-        # MENTOS marks unresolved Cβ positions with bin = -1; those must NOT be
-        # counted as contacts. Without the `>= 0` guard, `-1 < threshold` is
-        # True and K gets inflated → P@K is systematically wrong for entries
-        # with missing residues.
+        # bin < contact_bin == contact; -1 (unresolved) must NOT count as contact.
         raw = sample.contact_map.numpy()
-        contact_map = (raw >= 0) & (raw < self.contact_threshold_bin)
-        sequences = list(sample.sequences)
-        return {"contact_map": contact_map, "sequences": sequences}
+        contact_map = (raw >= 0) & (raw < self.contact_bin)
+        return {"contact_map": contact_map, "sequences": list(sample.sequences)}
 
     def score(self, entry: Entry, contact_path: Path) -> dict[str, float]:
         d = np.load(contact_path)

@@ -1,0 +1,14 @@
+# Boltz-2 (with MSAs) across the four leakage-controlled MENTOS val splits.
+# Run:  ecstasy experiment experiments/boltz2_val_splits.yaml
+# Dry:  ecstasy experiment experiments/boltz2_val_splits.yaml --limit 0
+# Needs per-chain MSAs in the store first:
+#   ecstasy msa --datasets val_seq_chain,val_seq_pair,val_pinder_chain,val_pinder_pair --kind per_chain --phase submit
+#   ecstasy msa --datasets ... --kind per_chain --phase ingest
+name: boltz2_val_splits
+datasets:
+  - val_seq_chain
+  - val_seq_pair
+  - val_pinder_chain
+  - val_pinder_pair
+runs:
+  - {model: boltz2, preset: full}
