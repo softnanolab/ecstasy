@@ -2,7 +2,9 @@
 # ${VAR} expands against ecstasy.config.Settings.
 #   runner          script under models/_runners/ run inside `env`
 #   env             venv whose bin/python executes the runner
-#   msa             none | per_chain (unpaired, by seq-hash) | complex (paired, by pair-hash)
+#   msa             none | per_chain (unpaired a3m, by seq-hash) | complex (paired a3m, by pair-hash)
+#                   | boltz_csv (paired+unpaired per-chain CSV, by pair-hash; reproduces
+#                     boltz --use_msa_server — a custom .a3m would drop ALL pairing)
 #   infra           machine knobs that do NOT affect outputs (excluded from the variant id)
 #   default_preset  preset used when --preset is omitted
 #   presets         named output-affecting parameter sets; pick by name, tweak with --set
@@ -10,7 +12,7 @@
 boltz2:
   runner: boltz2_runner.py
   env: ${ENVS_ROOT}/.venv-boltz
-  msa: per_chain
+  msa: boltz_csv
   infra: {num_workers: 0, devices: 1, no_kernels: true}
   default_preset: full
   presets:

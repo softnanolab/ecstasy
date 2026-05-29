@@ -20,15 +20,16 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Built-in defaults = the current ISAMBARD/u6jv cluster layout. Override any of
-# them via the environment or .env without touching code or the registries.
-_DEFAULTS: dict[str, str] = {
-    "DATA_ROOT": "/projects/u6jv/boltz_benchmarking/DATA",          # all run outputs
-    "MENTOS_ROOT": "/projects/u6jv/public/MENTOS/DATA",             # MENTOS splits + GT
-    "ECSTASY_ROOT": "/projects/u6jv/ecstasy",                       # model weights (e.g. msa_pairformer)
-    "ENVS_ROOT": "/home/u6jv/harsh.u6jv/ecstasy/envs",              # per-model venvs (shared, absolute)
-    "TOOLS_ROOT": "/home/u6jv/harsh.u6jv/ecstasy/tools",            # vendored binaries (shared, absolute)
-}
+# Filesystem roots are machine-specific absolute paths, so they are NOT committed.
+# Set them in a repo-root `.env` (gitignored) or the environment; see `.env.example`
+# for the keys. Defaults are intentionally empty so a missing root surfaces loudly
+# rather than silently writing under the wrong tree.
+#   DATA_ROOT     all run outputs (runs/, msa_store/) — ecstasy-only, clean
+#   MENTOS_ROOT   MENTOS splits + ground truth
+#   ECSTASY_ROOT  model weights (e.g. msa_pairformer)
+#   ENVS_ROOT     per-model venvs        TOOLS_ROOT  vendored binaries (mmseqs, hhsuite)
+_ROOTS = ("DATA_ROOT", "MENTOS_ROOT", "ECSTASY_ROOT", "ENVS_ROOT", "TOOLS_ROOT")
+_DEFAULTS: dict[str, str] = {k: "" for k in _ROOTS}
 
 
 @lru_cache(maxsize=1)
@@ -45,8 +46,18 @@ def _dotenv() -> dict[str, str]:
     return out
 
 
+def env_value(key: str, default: str = "") -> str:
+    """Read a machine-specific setting: env > .env > default.
+
+    The single resolution chain for everything that must not be committed —
+    the filesystem roots (via :func:`_value`) and ad-hoc keys like
+    ``COLABFOLD_DBS`` / ``CUDA_MODULE``.
+    """
+    return os.environ.get(key) or _dotenv().get(key) or default
+
+
 def _value(key: str) -> str:
-    return os.environ.get(key) or _dotenv().get(key) or _DEFAULTS[key]
+    return env_value(key, _DEFAULTS[key])
 
 
 @dataclass(frozen=True)
@@ -59,11 +70,11 @@ class Settings:
 
     @property
     def runs_root(self) -> Path:
-        return self.DATA_ROOT / "ecstasy" / "runs"
+        return self.DATA_ROOT / "runs"
 
     @property
     def msa_store(self) -> Path:
-        return self.DATA_ROOT / "ecstasy" / "msa_store"
+        return self.DATA_ROOT / "msa_store"
 
 
 @lru_cache(maxsize=1)

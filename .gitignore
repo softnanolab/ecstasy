@@ -17,3 +17,5 @@ predictions/*
 resources/boltz/*
 resources/pdb_features.json
 test.ipynb
+# local machine paths + secrets (never commit)
+.env

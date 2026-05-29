@@ -46,7 +46,7 @@ def test_default_preset_and_variant():
     assert m.preset == "full" and m.variant == "full"
     assert m.params["recycling_steps"] == 3
     assert m.infra["num_workers"] == 0          # infra separate from params
-    assert m.msa == "per_chain" and m.needs_msa
+    assert m.msa == "boltz_csv" and m.needs_msa
 
 
 def test_override_changes_variant_deterministically():
@@ -72,9 +72,10 @@ def test_store_lookup_arms():
     from ecstasy.datasets.base import Entry
     e = Entry(id="x", sequences=("ACDE", "FGHI"), chain_ids=("A", "B"))
     assert store.lookup(e, "none") is None
-    # store is empty under the test DATA_ROOT, so both flavours miss -> None
+    # store is empty under the test DATA_ROOT, so all flavours miss -> None
     assert store.lookup(e, "per_chain") is None
     assert store.lookup(e, "complex") is None
+    assert store.lookup(e, "boltz_csv") is None
 
 
 def test_variant_distinguishes_different_overrides():

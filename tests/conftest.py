@@ -90,7 +90,7 @@ def first_entry_id(dataset: str = SMOKE_DATASET) -> str:
 
 def find_contact_npz(data_root: Path, dataset: str, model: str,
                      variant: str, entry_id: str) -> Path | None:
-    p = (Path(data_root) / "ecstasy" / "runs" / dataset / model / variant
+    p = (Path(data_root) / "runs" / dataset / model / variant
          / "predictions" / entry_id / "contact.npz")
     return p if p.exists() else None
 
