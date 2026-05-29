@@ -68,6 +68,35 @@ def test_msa_store_hashing_is_stable():
     assert store.pair_hash(["AC", "DE"]) != store.pair_hash(["DE", "AC"])  # order matters
 
 
+def test_store_lookup_arms():
+    from ecstasy.datasets.base import Entry
+    e = Entry(id="x", sequences=("ACDE", "FGHI"), chain_ids=("A", "B"))
+    assert store.lookup(e, "none") is None
+    # store is empty under the test DATA_ROOT, so both flavours miss -> None
+    assert store.lookup(e, "per_chain") is None
+    assert store.lookup(e, "complex") is None
+
+
+def test_variant_distinguishes_different_overrides():
+    a = load_model("boltz2", overrides={"recycling_steps": 5})
+    b = load_model("boltz2", overrides={"recycling_steps": 6})
+    assert a.variant != b.variant
+
+
+def test_split_complex_hetero_homo_and_fallback():
+    from ecstasy.msa.generate import _split_complex
+    # heterodimer: explicit per-chain lengths
+    assert _split_complex("AAABB", "#3,2\t1,1") == ["AAA", "BB"]
+    # homodimer: one unique length, copies=2 -> must expand, not collapse
+    homo = _split_complex("AAAAAA", "#3\t2")
+    assert homo == ["AAA", "AAA"]
+    # the regression: hash matches what prepare wrote from entry.sequences
+    assert store.pair_hash(homo) == store.pair_hash(["AAA", "AAA"])
+    # malformed header (lengths don't sum) and no header -> single chain
+    assert _split_complex("ABCDE", "#9,9\t1,1") == ["ABCDE"]
+    assert _split_complex("ABC", None) == ["ABC"]
+
+
 def test_experiment_expands_matrix():
     m = {"name": "t", "datasets": ["val_seq_chain", "val_pinder_pair"],
          "runs": [{"model": "boltz2", "preset": "full"},

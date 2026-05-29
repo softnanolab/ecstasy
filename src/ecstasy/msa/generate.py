@@ -124,16 +124,25 @@ def _index_a3ms_by_hash(a3m_dir: Path, kind: str) -> dict[str, Path]:
 
 
 def _split_complex(query: str, header: str | None) -> list[str]:
-    """Split a concatenated complex query into chains using colabfold '#L1,L2' header."""
+    """Split a concatenated complex query into chains using the colabfold header.
+
+    The header is ``#<len1>,<len2>,...\t<copies1>,<copies2>,...`` — colabfold lists
+    each *unique* chain length once with a copy count, so a homodimer is
+    ``#<L>\t2`` (one length, two copies), not ``#<L>,<L>\t1,1``. We expand
+    lengths by copy count before slicing so the per-chain split (and thus the
+    pair hash) matches what `prepare` wrote from `entry.sequences`.
+    """
     if header:
         try:
-            lens = header.lstrip("#").split("\t")[0].split(",")
-            lens = [int(x) for x in lens]
+            fields = header.lstrip("#").split("\t")
+            lens = [int(x) for x in fields[0].split(",")]
+            copies = [int(x) for x in fields[1].split(",")] if len(fields) > 1 else [1] * len(lens)
+            expanded = [L for L, c in zip(lens, copies) for _ in range(c)]
             out, pos = [], 0
-            for L in lens:
+            for L in expanded:
                 out.append(query[pos:pos + L])
                 pos += L
-            if "".join(out) == query:
+            if "".join(out) == query and all(out):  # exact tiling, no empty chains
                 return out
         except (ValueError, IndexError):
             pass
