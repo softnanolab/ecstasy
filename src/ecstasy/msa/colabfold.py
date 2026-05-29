@@ -274,15 +274,20 @@ def stitch_paired_msa(
 
 @dataclass
 class SaveMsaFilters:
-    """Notebook `save_msa` defaults. None disables that filter.
+    """MSA Pairformer paper (SI) pairing/filter defaults. None disables a filter.
 
-    Notebook UI cell defaults: cov=0.75, id=0.15, neighbor_stitching=True,
-    Δgene=1 (extremely aggressive operon-proximity filter — keep only rows
-    whose two UniRef IDs come from adjacent genes on the same genome).
+    From the SI (Akiyama et al. 2025, bioRxiv 2025.08.02.668173): the accessible
+    MMseqs2 interface-contact route uses proximity-based pairing with **distance
+    ≤ 20** (paircomplete-pairfilterprox_20), **coverage ≥ 75%**, **minimum query
+    identity ≥ 30%**, and **512 sequences** (hhfilter, applied at model load).
+    (The interactive notebook UI used the more aggressive cov=0.75/id=0.15/Δgene=1;
+    those are demo defaults, not the benchmark settings. The paper's HEADLINE
+    interface numbers used pre-computed MSAs from Ovchinnikov et al.; this MMseqs2
+    path is the authors' provided accessible reproduction.)
     """
     min_coverage: float | None = 0.75
-    min_identity: float | None = 0.15
-    max_genomic_distance: int | None = 1
+    min_identity: float | None = 0.30
+    max_genomic_distance: int | None = 20
 
 
 @dataclass
