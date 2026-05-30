@@ -394,32 +394,51 @@ def prepare_complex(datasets: list[str]) -> Path:
     return fasta
 
 
-def fetch_complex(datasets: list[str]) -> None:
-    """Fetch+filter+stitch each missing complex from the ColabFold API into the store.
-
-    Resumable: skips complexes already present. Continues past per-complex errors.
-    """
+def _fetch_one_complex(v: dict) -> int:
+    """Fetch+filter+stitch one complex into the store; returns row count. Own session."""
     import requests
+    dst = store.path_for_pair(v["seqs"])
+    if dst.exists():
+        return -1  # already present (resume)
+    header, rows = _complex_header_and_rows(requests.Session(), v["seqs"])
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".a3m.tmp")          # write-then-rename so partials never look "done"
+    with tmp.open("w") as f:
+        f.write(header + "\n")
+        for hdr, seq in rows:
+            f.write(f">{hdr}\n{seq}\n")
+    tmp.rename(dst)
+    return len(rows)
+
+
+def fetch_complex(datasets: list[str], workers: int = 4) -> None:
+    """Fetch missing complexes from the ColabFold API into the store, concurrently.
+
+    Resumable (skips complexes already present) and tolerant of per-complex errors.
+    `workers` concurrent API jobs (the server runs them in parallel); each colabfold
+    call already backs off on 429, so modest concurrency stays polite. Override with
+    the COMPLEX_FETCH_WORKERS env var.
+    """
+    import os as _os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    workers = int(_os.environ.get("COMPLEX_FETCH_WORKERS", workers))
     items = _collect(datasets, "complex")
     store.complex_dir().mkdir(parents=True, exist_ok=True)
-    missing = [(h, v) for h, v in sorted(items.items())
-               if not store.path_for_pair(v["seqs"]).exists()]
-    print(f"[msa:complex] fetching {len(missing)} of {len(items)} complexes from api.colabfold.com")
-    session = requests.Session()
+    missing = [v for v in items.values() if not store.path_for_pair(v["seqs"]).exists()]
+    print(f"[msa:complex] fetching {len(missing)} of {len(items)} complexes "
+          f"from api.colabfold.com ({workers} workers)", flush=True)
     done = errors = 0
-    for i, (h, v) in enumerate(missing, 1):
-        try:
-            header, rows = _complex_header_and_rows(session, v["seqs"])
-            dst = store.path_for_pair(v["seqs"])
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            with dst.open("w") as f:
-                f.write(header + "\n")
-                for hdr, seq in rows:
-                    f.write(f">{hdr}\n{seq}\n")
-            done += 1
-            if i % 25 == 0 or i == len(missing):
-                print(f"[msa:complex] {i}/{len(missing)} (last {h}: {len(rows)} rows)", flush=True)
-        except Exception as e:  # noqa: BLE001
-            errors += 1
-            print(f"[msa:complex] ERROR {h}: {e}", file=__import__('sys').stderr, flush=True)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_fetch_one_complex, v): v["header"] for v in missing}
+        for n, fut in enumerate(as_completed(futs), 1):
+            h = futs[fut]
+            try:
+                rows = fut.result()
+                if rows >= 0:
+                    done += 1
+            except Exception as e:  # noqa: BLE001
+                errors += 1
+                print(f"[msa:complex] ERROR {h}: {e}", file=__import__('sys').stderr, flush=True)
+            if n % 25 == 0 or n == len(missing):
+                print(f"[msa:complex] {n}/{len(missing)} (done={done} errors={errors})", flush=True)
     print(f"[msa:complex] done: wrote={done} errors={errors}")
