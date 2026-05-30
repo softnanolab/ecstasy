@@ -38,53 +38,15 @@ RETRY_BACKOFF_BASE_S = 8
 # ---- HTTP client ----------------------------------------------------------
 
 
-def submit_pair(
-    session: requests.Session,
-    fasta: str,
-    *,
-    mode: str = DEFAULT_MODE,
-    max_retries: int = MAX_RETRIES,
-) -> str:
-    """POST a paired FASTA to /ticket/pair; return the server job id.
+def _submit(session: requests.Session, endpoint: str, fasta: str, mode: str,
+            max_retries: int) -> str:
+    """POST a FASTA to a ColabFold ``/ticket/*`` endpoint; return the job id.
 
     Backs off exponentially on 429 (rate limit) and transient network errors.
     """
     for attempt in range(max_retries):
         try:
-            r = session.post(
-                f"{HOST}/ticket/pair",
-                data={"q": fasta, "mode": mode},
-                timeout=SUBMIT_TIMEOUT_S,
-            )
-            if r.status_code == 429:
-                time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
-                continue
-            r.raise_for_status()
-            j = r.json()
-            if "id" not in j:
-                raise RuntimeError(f"no id in submit response: {j}")
-            return j["id"]
-        except requests.RequestException as e:
-            if attempt == max_retries - 1:
-                raise RuntimeError(f"submit failed: {e}")
-            time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
-    raise RuntimeError("submit retries exhausted")
-
-
-def submit_msa(
-    session: requests.Session,
-    fasta: str,
-    *,
-    mode: str = "env",
-    max_retries: int = MAX_RETRIES,
-) -> str:
-    """POST a single-sequence FASTA to /ticket/msa; return the server job id.
-
-    Unpaired MSA (uniref + env), used for homodimer tiling. Mirrors submit_pair.
-    """
-    for attempt in range(max_retries):
-        try:
-            r = session.post(f"{HOST}/ticket/msa", data={"q": fasta, "mode": mode},
+            r = session.post(f"{HOST}/{endpoint}", data={"q": fasta, "mode": mode},
                              timeout=SUBMIT_TIMEOUT_S)
             if r.status_code == 429:
                 time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
@@ -96,8 +58,21 @@ def submit_msa(
             return j["id"]
         except requests.RequestException as e:
             if attempt == max_retries - 1:
-                raise RuntimeError(f"submit_msa failed: {e}")
+                raise RuntimeError(f"submit to {endpoint} failed: {e}")
             time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
+    raise RuntimeError(f"submit to {endpoint} retries exhausted")
+
+
+def submit_pair(session: requests.Session, fasta: str, *,
+                mode: str = DEFAULT_MODE, max_retries: int = MAX_RETRIES) -> str:
+    """POST a paired FASTA to /ticket/pair; return the server job id."""
+    return _submit(session, "ticket/pair", fasta, mode, max_retries)
+
+
+def submit_msa(session: requests.Session, fasta: str, *,
+               mode: str = "env", max_retries: int = MAX_RETRIES) -> str:
+    """POST a single-sequence FASTA to /ticket/msa (unpaired, for homodimer tiling)."""
+    return _submit(session, "ticket/msa", fasta, mode, max_retries)
     raise RuntimeError("submit_msa retries exhausted")
 
 
