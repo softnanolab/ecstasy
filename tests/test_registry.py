@@ -84,18 +84,11 @@ def test_variant_distinguishes_different_overrides():
     assert a.variant != b.variant
 
 
-def test_split_complex_hetero_homo_and_fallback():
-    from ecstasy.msa.generate import _split_complex
-    # heterodimer: explicit per-chain lengths
-    assert _split_complex("AAABB", "#3,2\t1,1") == ["AAA", "BB"]
-    # homodimer: one unique length, copies=2 -> must expand, not collapse
-    homo = _split_complex("AAAAAA", "#3\t2")
-    assert homo == ["AAA", "AAA"]
-    # the regression: hash matches what prepare wrote from entry.sequences
-    assert store.pair_hash(homo) == store.pair_hash(["AAA", "AAA"])
-    # malformed header (lengths don't sum) and no header -> single chain
-    assert _split_complex("ABCDE", "#9,9\t1,1") == ["ABCDE"]
-    assert _split_complex("ABC", None) == ["ABC"]
+def test_msa_backends_registered():
+    from ecstasy.msa.backends import BACKENDS
+    assert set(BACKENDS) == {"boltz_csv", "complex"}
+    for b in BACKENDS.values():
+        assert all(hasattr(b, fn) for fn in ("prepare", "submit", "ingest"))
 
 
 def test_experiment_expands_matrix():

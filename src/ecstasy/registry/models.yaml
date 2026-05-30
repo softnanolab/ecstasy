@@ -54,7 +54,9 @@ msa_pairformer:
 colabfold:
   runner: colabfold_runner.py
   env: ${ENVS_ROOT}/.venv-colabfold
-  msa: per_chain
+  # none: colabfold_batch fetches/handles its own MSA via --msa-mode; the runner
+  # never consumes the ecstasy MSA store.
+  msa: none
   default_preset: single_seq
   presets:
     single_seq: {msa_mode: single_sequence, num_recycle: 3, contact_cutoff_bin: 19}
