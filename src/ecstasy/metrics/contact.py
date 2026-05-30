@@ -46,12 +46,19 @@ def pak_inter_chain(
     contact_prob: np.ndarray,
     contact_gt: np.ndarray,
     chain_ids: np.ndarray,
+    valid: np.ndarray | None = None,
 ) -> dict[str, float]:
     """Interchain P@K on a square (L, L) prediction + GT with per-token chain ids.
 
     K is the number of true interchain contacts in the strict upper triangle.
     Thin adapter around `pak_from_pairs` that selects the interchain-upper-tri
     pairs.
+
+    `valid` (optional, (L, L) bool) gates the candidate pool to *defined* pairs —
+    MENTOS's ``is_defined`` (resolved Cβ-Cβ). Pairs that are False in `valid`
+    (e.g. unresolved Cβ / bin == -1) are dropped from BOTH the positives and the
+    denominator, matching MENTOS exactly; without it, undefined pairs would
+    linger as negatives and dilute precision differently than MENTOS.
     """
     contact_prob = np.asarray(contact_prob, dtype=np.float64)
     contact_gt = np.asarray(contact_gt).astype(bool)
@@ -63,4 +70,6 @@ def pak_inter_chain(
         )
     triu = np.triu_indices(L, k=1)
     inter = chain_ids[triu[0]] != chain_ids[triu[1]]
+    if valid is not None:
+        inter = inter & np.asarray(valid).astype(bool)[triu]
     return pak_from_pairs(contact_prob[triu][inter], contact_gt[triu][inter])

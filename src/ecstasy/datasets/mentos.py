@@ -46,13 +46,19 @@ class MentosSquareDataset(Dataset):
         # bin < contact_bin == contact; -1 (unresolved) must NOT count as contact.
         raw = sample.contact_map.numpy()
         contact_map = (raw >= 0) & (raw < self.contact_bin)
-        return {"contact_map": contact_map, "sequences": list(sample.sequences)}
+        # `valid` = MENTOS is_defined: a pair is defined iff its Cβ-Cβ bin is resolved
+        # (raw >= 0). Unresolved (-1) pairs are dropped from the candidate pool so they
+        # never count as negatives (matches mentos.metrics_inter_chain).
+        valid = raw >= 0
+        return {"contact_map": contact_map, "valid": valid,
+                "sequences": list(sample.sequences)}
 
     def score(self, entry: Entry, contact_path: Path) -> dict[str, float]:
         d = np.load(contact_path)
         probs = np.asarray(d["probs"], dtype=np.float32)
         gt = self.gt_for(entry.id)
         contact_gt = gt["contact_map"]
+        valid = gt["valid"]
         seqs = gt["sequences"]
         if len(seqs) != 2:
             return {"_skipped": "non-dimer"}
@@ -61,4 +67,4 @@ class MentosSquareDataset(Dataset):
         if probs.shape[0] != L or contact_gt.shape[0] != L:
             return {"_error": f"shape mismatch: probs={probs.shape}, gt={contact_gt.shape}, L={L}"}
         chain_ids = np.array([0] * la + [1] * lb)
-        return pak_inter_chain(probs, contact_gt, chain_ids)
+        return pak_inter_chain(probs, contact_gt, chain_ids, valid=valid)

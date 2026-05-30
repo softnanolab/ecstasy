@@ -28,7 +28,7 @@ def test_dataset_loads_and_resolves_paths():
     d = load_dataset("val_pinder_pair")
     assert d.name == "val_pinder_pair"
     assert "${" not in str(d.index) and str(d.index).endswith("val_pinder_pair/index.parquet")
-    assert d.contact_bin == 5
+    assert d.contact_bin == 19
 
 
 def test_unknown_dataset_raises():
