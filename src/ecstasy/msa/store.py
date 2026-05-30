@@ -32,6 +32,10 @@ def complex_dir() -> Path:
     return settings().msa_store / "complex"
 
 
+def boltz_csv_dir() -> Path:
+    return settings().msa_store / "boltz_csv"
+
+
 def path_for_chain(seq: str) -> Path:
     return per_chain_dir() / f"{chain_hash(seq)}.a3m"
 
@@ -40,11 +44,22 @@ def path_for_pair(seqs) -> Path:
     return complex_dir() / f"{pair_hash(seqs)}.a3m"
 
 
+def boltz_csv_complex_dir(seqs) -> Path:
+    """Per-complex dir holding one ``<chain_index>.csv`` per chain (pairing-aware)."""
+    return boltz_csv_dir() / pair_hash(seqs)
+
+
+def path_for_boltz_csv(seqs, chain_index: int) -> Path:
+    return boltz_csv_complex_dir(seqs) / f"{chain_index}.csv"
+
+
 def lookup(entry, kind: str):
     """Return the MSA form a model needs, or None to trigger single-seq fallback.
 
     per_chain -> {chain_id: a3m_path} for chains that have one (or None)
     complex   -> a single a3m path (or None)
+    boltz_csv -> {chain_id: csv_path} paired+unpaired per chain, keyed by the
+                 complex (pair-hash); reproduces boltz --use_msa_server (or None)
     none      -> None
     """
     if kind == "per_chain":
@@ -57,4 +72,18 @@ def lookup(entry, kind: str):
     if kind == "complex":
         p = path_for_pair(entry.sequences)
         return p if p.exists() else None
+    if kind == "boltz_csv":
+        # colabfold dedups identical chains, so a homodimer yields a single CSV.
+        # Map each chain to its *unique-sequence* index (first-occurrence order),
+        # matching how ingest wrote them, so repeated chains resolve correctly.
+        uniq: list = []
+        for s in entry.sequences:
+            if s not in uniq:
+                uniq.append(s)
+        out = {}
+        for cid, seq in zip(entry.chain_ids, entry.sequences):
+            p = path_for_boltz_csv(entry.sequences, uniq.index(seq))
+            if p.exists():
+                out[cid] = p
+        return out or None
     return None

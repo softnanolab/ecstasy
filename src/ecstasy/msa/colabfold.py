@@ -38,24 +38,16 @@ RETRY_BACKOFF_BASE_S = 8
 # ---- HTTP client ----------------------------------------------------------
 
 
-def submit_pair(
-    session: requests.Session,
-    fasta: str,
-    *,
-    mode: str = DEFAULT_MODE,
-    max_retries: int = MAX_RETRIES,
-) -> str:
-    """POST a paired FASTA to /ticket/pair; return the server job id.
+def _submit(session: requests.Session, endpoint: str, fasta: str, mode: str,
+            max_retries: int) -> str:
+    """POST a FASTA to a ColabFold ``/ticket/*`` endpoint; return the job id.
 
     Backs off exponentially on 429 (rate limit) and transient network errors.
     """
     for attempt in range(max_retries):
         try:
-            r = session.post(
-                f"{HOST}/ticket/pair",
-                data={"q": fasta, "mode": mode},
-                timeout=SUBMIT_TIMEOUT_S,
-            )
+            r = session.post(f"{HOST}/{endpoint}", data={"q": fasta, "mode": mode},
+                             timeout=SUBMIT_TIMEOUT_S)
             if r.status_code == 429:
                 time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
                 continue
@@ -66,9 +58,55 @@ def submit_pair(
             return j["id"]
         except requests.RequestException as e:
             if attempt == max_retries - 1:
-                raise RuntimeError(f"submit failed: {e}")
+                raise RuntimeError(f"submit to {endpoint} failed: {e}")
             time.sleep(RETRY_BACKOFF_BASE_S * (2 ** attempt))
-    raise RuntimeError("submit retries exhausted")
+    raise RuntimeError(f"submit to {endpoint} retries exhausted")
+
+
+def submit_pair(session: requests.Session, fasta: str, *,
+                mode: str = DEFAULT_MODE, max_retries: int = MAX_RETRIES) -> str:
+    """POST a paired FASTA to /ticket/pair; return the server job id."""
+    return _submit(session, "ticket/pair", fasta, mode, max_retries)
+
+
+def submit_msa(session: requests.Session, fasta: str, *,
+               mode: str = "env", max_retries: int = MAX_RETRIES) -> str:
+    """POST a single-sequence FASTA to /ticket/msa (unpaired, for homodimer tiling)."""
+    return _submit(session, "ticket/msa", fasta, mode, max_retries)
+    raise RuntimeError("submit_msa retries exhausted")
+
+
+def parse_unpaired_a3m_bytes(tar_bytes: bytes) -> list[str]:
+    """Extract uniref.a3m (+ bfd…a3m) from the /ticket/msa tarball; matched-only seqs.
+
+    Returns deduped matched-only (insertions stripped) sequences, query first.
+    Used to tile a homodimer's paired MSA from its single-chain alignment.
+    """
+    names = ("uniref.a3m", "bfd.mgnify30.metaeuk30.smag30.a3m")
+    seqs: list[str] = []
+    seen: set[str] = set()
+    with tarfile.open(fileobj=BytesIO(tar_bytes), mode="r:gz") as tf:
+        members = {m.name.split("/")[-1]: m for m in tf.getmembers()}
+        for nm in names:
+            m = members.get(nm)
+            if m is None:
+                continue
+            text = tf.extractfile(m).read().decode("utf-8", errors="replace")
+            cur: list[str] = []
+            for line in text.splitlines():
+                if line.startswith(">"):
+                    if cur:
+                        s = _strip_inserts("".join(cur))
+                        if s and s not in seen:
+                            seen.add(s); seqs.append(s)
+                    cur = []
+                elif line:
+                    cur.append(line.rstrip())
+            if cur:
+                s = _strip_inserts("".join(cur))
+                if s and s not in seen:
+                    seen.add(s); seqs.append(s)
+    return seqs
 
 
 def poll_until_done(
@@ -274,15 +312,20 @@ def stitch_paired_msa(
 
 @dataclass
 class SaveMsaFilters:
-    """Notebook `save_msa` defaults. None disables that filter.
+    """MSA Pairformer paper (SI) pairing/filter defaults. None disables a filter.
 
-    Notebook UI cell defaults: cov=0.75, id=0.15, neighbor_stitching=True,
-    Δgene=1 (extremely aggressive operon-proximity filter — keep only rows
-    whose two UniRef IDs come from adjacent genes on the same genome).
+    From the SI (Akiyama et al. 2025, bioRxiv 2025.08.02.668173): the accessible
+    MMseqs2 interface-contact route uses proximity-based pairing with **distance
+    ≤ 20** (paircomplete-pairfilterprox_20), **coverage ≥ 75%**, **minimum query
+    identity ≥ 30%**, and **512 sequences** (hhfilter, applied at model load).
+    (The interactive notebook UI used the more aggressive cov=0.75/id=0.15/Δgene=1;
+    those are demo defaults, not the benchmark settings. The paper's HEADLINE
+    interface numbers used pre-computed MSAs from Ovchinnikov et al.; this MMseqs2
+    path is the authors' provided accessible reproduction.)
     """
     min_coverage: float | None = 0.75
-    min_identity: float | None = 0.15
-    max_genomic_distance: int | None = 1
+    min_identity: float | None = 0.30
+    max_genomic_distance: int | None = 20
 
 
 @dataclass
@@ -322,16 +365,14 @@ def apply_save_msa_filters(
                 stats.filtered_id += 1
                 continue
             if filters.max_genomic_distance is not None:
-                # We need UniRef IDs on every chain side to compute genomic distance;
-                # without them, the row has no operon evidence — drop to mirror
-                # genomic_distance=1 strictness.
-                if not all(e.has_uniref and e.uid for e in entries):
-                    stats.filtered_dist += 1
-                    continue
-                dists = _calc_distances([e.uniprot_num for e in entries])
-                if dists and dists[0] != -1 and dists[0] > filters.max_genomic_distance:
-                    stats.filtered_dist += 1
-                    continue
+                # Notebook save_msa applies the genomic-distance (operon-proximity) test
+                # ONLY to rows with a UniRef accession on every chain. Rows lacking UniRef
+                # have no operon evidence and are KEPT (not dropped) — matching the notebook.
+                if all(e.has_uniref and e.uid for e in entries):
+                    dists = _calc_distances([e.uniprot_num for e in entries])
+                    if dists and dists[0] != -1 and dists[0] > filters.max_genomic_distance:
+                        stats.filtered_dist += 1
+                        continue
         header = "|".join(e.header for e in entries) if not entries[0].is_query else "query"
         kept.append((header, "".join(seqs)))
         stats.kept += 1

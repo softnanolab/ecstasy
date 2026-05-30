@@ -10,7 +10,11 @@ _mentos: &mentos
   kind: mentos_square
   gt_root: ${MENTOS_ROOT}/pdb/processed/data
   split: val
-  contact_bin: 5
+  # MUST match MENTOS's CONTACT_LABEL_THRESHOLD_BIN=19 (Cβ-Cβ ≤ 7.9375 Å, bin<19) so
+  # interchain P@K/AUC are directly comparable to the MENTOS benchmark. bin<5 was a
+  # far stricter, non-comparable GT (degenerate median P@K=0). Verified identical to
+  # mentos.metrics.contact_prediction.metrics_inter_chain at bin 19.
+  contact_bin: 19
 
 # MENTOS seq_id_30 val (legacy headline; 1,511 dimers)
 mentos_seqid30:

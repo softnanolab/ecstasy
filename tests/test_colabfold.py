@@ -211,11 +211,26 @@ class TestApplySaveMsaFilters:
         per_chain = self._build_paired_entries(
             depth=2,
             covs=[0.9, 0.9], ids=[0.5, 0.5],
-            dists=[1, 5],  # row 2 has Δgene=5, default filter is 1
+            dists=[1, 5],  # row 2 has Δgene=5
         )
-        kept, stats = apply_save_msa_filters(per_chain, [4, 4])
+        # explicit Δgene=1 (the default is the SI value 20); rows have UniRef so the
+        # genomic test applies and the far row (Δgene=5 > 1) is dropped.
+        kept, stats = apply_save_msa_filters(
+            per_chain, [4, 4], filters=SaveMsaFilters(max_genomic_distance=1))
         assert stats.kept == 2  # query + first hit
         assert stats.filtered_dist == 1
+
+    def test_non_uniref_rows_kept(self):
+        # Notebook save_msa applies the genomic test ONLY to rows with UniRef on every
+        # chain; rows lacking UniRef are KEPT (not dropped).
+        per_chain = self._build_paired_entries(
+            depth=1, covs=[0.9], ids=[0.5], dists=[99],  # Δgene=99 would fail IF tested
+        )
+        for c in per_chain:
+            c[1].has_uniref = False  # row 1 lacks UniRef -> genomic test must be skipped
+        kept, stats = apply_save_msa_filters(
+            per_chain, [4, 4], filters=SaveMsaFilters(max_genomic_distance=1))
+        assert stats.kept == 2 and stats.filtered_dist == 0  # query + the non-UniRef hit
 
     def test_none_filters_disable(self):
         # All three filters None -> nothing dropped

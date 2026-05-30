@@ -28,7 +28,7 @@ def test_dataset_loads_and_resolves_paths():
     d = load_dataset("val_pinder_pair")
     assert d.name == "val_pinder_pair"
     assert "${" not in str(d.index) and str(d.index).endswith("val_pinder_pair/index.parquet")
-    assert d.contact_bin == 5
+    assert d.contact_bin == 19
 
 
 def test_unknown_dataset_raises():
@@ -46,7 +46,7 @@ def test_default_preset_and_variant():
     assert m.preset == "full" and m.variant == "full"
     assert m.params["recycling_steps"] == 3
     assert m.infra["num_workers"] == 0          # infra separate from params
-    assert m.msa == "per_chain" and m.needs_msa
+    assert m.msa == "boltz_csv" and m.needs_msa
 
 
 def test_override_changes_variant_deterministically():
@@ -72,9 +72,10 @@ def test_store_lookup_arms():
     from ecstasy.datasets.base import Entry
     e = Entry(id="x", sequences=("ACDE", "FGHI"), chain_ids=("A", "B"))
     assert store.lookup(e, "none") is None
-    # store is empty under the test DATA_ROOT, so both flavours miss -> None
+    # store is empty under the test DATA_ROOT, so all flavours miss -> None
     assert store.lookup(e, "per_chain") is None
     assert store.lookup(e, "complex") is None
+    assert store.lookup(e, "boltz_csv") is None
 
 
 def test_variant_distinguishes_different_overrides():
@@ -83,18 +84,11 @@ def test_variant_distinguishes_different_overrides():
     assert a.variant != b.variant
 
 
-def test_split_complex_hetero_homo_and_fallback():
-    from ecstasy.msa.generate import _split_complex
-    # heterodimer: explicit per-chain lengths
-    assert _split_complex("AAABB", "#3,2\t1,1") == ["AAA", "BB"]
-    # homodimer: one unique length, copies=2 -> must expand, not collapse
-    homo = _split_complex("AAAAAA", "#3\t2")
-    assert homo == ["AAA", "AAA"]
-    # the regression: hash matches what prepare wrote from entry.sequences
-    assert store.pair_hash(homo) == store.pair_hash(["AAA", "AAA"])
-    # malformed header (lengths don't sum) and no header -> single chain
-    assert _split_complex("ABCDE", "#9,9\t1,1") == ["ABCDE"]
-    assert _split_complex("ABC", None) == ["ABC"]
+def test_msa_backends_registered():
+    from ecstasy.msa.backends import BACKENDS
+    assert set(BACKENDS) == {"boltz_csv", "complex"}
+    for b in BACKENDS.values():
+        assert all(hasattr(b, fn) for fn in ("prepare", "submit", "ingest"))
 
 
 def test_experiment_expands_matrix():

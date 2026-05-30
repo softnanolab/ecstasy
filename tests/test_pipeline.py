@@ -56,8 +56,8 @@ def test_run_score_and_compare(fresh_data_root):
     assert result["dataset"] == "faketest" and result["variant"] == "full"
 
     run_compare("faketest")
-    csv = (fresh_data_root / "ecstasy" / "runs" / "faketest" / "comparison.csv")
-    md = (fresh_data_root / "ecstasy" / "runs" / "faketest" / "comparison.md")
+    csv = (fresh_data_root / "runs" / "faketest" / "comparison.csv")
+    md = (fresh_data_root / "runs" / "faketest" / "comparison.md")
     assert csv.exists() and md.exists()
     body = csv.read_text()
     assert "boltz2" in body and "full" in body

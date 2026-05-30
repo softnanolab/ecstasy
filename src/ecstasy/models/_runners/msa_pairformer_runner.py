@@ -32,6 +32,31 @@ import numpy as np
 import torch
 
 
+def _parse_chain_breaks(a3m_path: Path) -> list[int]:
+    """Chain-break indices from a ColabFold complex header `#L1,L2<TAB>c1,c2`.
+
+    Returns the cumulative residue offsets at each chain boundary (excluding the
+    end), expanding lengths by copy count. `#315,316\t1,1` -> [315];
+    `#60\t2` (homodimer) -> [60]. Empty for a monomer.
+    """
+    header = None
+    for ln in a3m_path.read_text().splitlines():
+        if ln.startswith("#"):
+            header = ln
+            break
+    if not header:
+        return []
+    fields = header.lstrip("#").split("\t")
+    lens = [int(x) for x in fields[0].split(",")]
+    copies = [int(x) for x in fields[1].split(",")] if len(fields) > 1 else [1] * len(lens)
+    expanded = [L for L, c in zip(lens, copies) for _ in range(c)]
+    breaks, pos = [], 0
+    for L in expanded[:-1]:
+        pos += L
+        breaks.append(pos)
+    return breaks
+
+
 def _build_singleseq_a3m(entry_id: str, sequences: list[str], dest: Path) -> Path:
     """Write a minimal ColabFold-format complex a3m with just the query.
 
@@ -86,13 +111,10 @@ def main():
     from MSA_Pairformer.model import MSAPairformer
     from MSA_Pairformer.dataset import MSA, prepare_msa_masks
 
-    sys.path.insert(0, str(Path("/home/u6jv/harsh.u6jv/colabfold-local/src")))
-    from run_pairformer import parse_colabfold_header, chain_aware_select
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[msa_pairformer] device={device}  max_msa_depth={max_msa_depth}", flush=True)
 
-    chain_breaks = parse_colabfold_header(a3m_path)
+    chain_breaks = _parse_chain_breaks(a3m_path)
 
     # Biopython 1.85+ SeqIO.parse("fasta") rejects leading `#` comments that
     # ColabFold writes as its complex header. MSA_Pairformer's dataset.parse_a3m_file
@@ -113,25 +135,23 @@ def main():
             )
             break
 
-    hhfilter_kwargs = {"binary": hhfilter_bin} if hhfilter_bin else {}
-    use_chain_aware = bool(chain_breaks)
-    candidate_depth = max_msa_depth * 4 if use_chain_aware else max_msa_depth
+    # Notebook fidelity: hhfilter is mandatory (no greedy fallback), plain `-diff 512`
+    # selection (NO ×4 inflation, NO chain-aware reselection — those change the kept
+    # subset and thus the coevolution signal), and np.random.seed(42) before MSA build.
+    if not hhfilter_bin:
+        raise RuntimeError("hhfilter_bin is required for faithful MSA Pairformer reproduction "
+                           "(the notebook always uses hhfilter -diff 512); none provided.")
+    np.random.seed(42)
     msa_obj = MSA(
         msa_file_path=str(a3m_path),
-        max_seqs=candidate_depth,
+        max_seqs=max_msa_depth,
         max_length=total_length,
         max_tokens=int(1e12),
-        diverse_select_method="hhfilter" if hhfilter_bin else "greedy",
-        hhfilter_kwargs=hhfilter_kwargs,
+        diverse_select_method="hhfilter",
+        hhfilter_kwargs={"binary": hhfilter_bin},
     )
     msa_tokenized = msa_obj.diverse_tokenized_msa
     n_seqs = msa_obj.n_diverse_seqs
-
-    if use_chain_aware and n_seqs > max_msa_depth:
-        tokens_np = msa_tokenized.numpy() if isinstance(msa_tokenized, torch.Tensor) else msa_tokenized
-        indices = chain_aware_select(tokens_np, chain_breaks[0], n_select=max_msa_depth)
-        msa_tokenized = msa_tokenized[indices] if isinstance(msa_tokenized, torch.Tensor) else msa_tokenized[indices]
-        n_seqs = len(indices)
     print(f"[msa_pairformer] MSA depth: {n_seqs}", flush=True)
 
     msa_tensor = msa_tokenized.long() if isinstance(msa_tokenized, torch.Tensor) else torch.from_numpy(msa_tokenized).long()
@@ -141,6 +161,9 @@ def main():
 
     model = MSAPairformer.from_pretrained(device=device, weights_dir=weights_dir)
     model.eval()
+    # Notebook runs with query biasing ON (cell 4 use_query_biasing=True); make it explicit.
+    if hasattr(model, "turn_on_query_biasing"):
+        model.turn_on_query_biasing()
 
     # autocast is CUDA-only here; on the CPU fallback path use a no-op context
     # so the runner still produces contact.npz without raising on CPU nodes.
@@ -149,23 +172,35 @@ def main():
         if device.type == "cuda"
         else contextlib.nullcontext()
     )
+    mk = dict(
+        msa=msa_onehot,
+        mask=mask.to(device),
+        msa_mask=msa_mask.to(device),
+        full_mask=full_mask.to(device),
+        pairwise_mask=pairwise_mask.to(device),
+        complex_chain_break_indices=[chain_breaks] if chain_breaks else None,
+        return_seq_weights=True,
+    )
     with torch.no_grad(), autocast_ctx:
-        res = model.predict_cb_contacts(
-            msa=msa_onehot,
-            mask=mask.to(device),
-            msa_mask=msa_mask.to(device),
-            full_mask=full_mask.to(device),
-            pairwise_mask=pairwise_mask.to(device),
-            complex_chain_break_indices=[chain_breaks] if chain_breaks else None,
-            return_seq_weights=True,
-        )
+        # Cb-Cb head (layer 15) — the definition-matched, scored map (vs MENTOS Cb<8A GT).
+        res = model.predict_cb_contacts(**mk)
+        # ConFind head (layer 18) — free secondary column (side-chain-contact definition).
+        confind = None
+        if hasattr(model, "predict_confind_contacts"):
+            try:
+                cres = model.predict_confind_contacts(**mk)
+                confind = cres["predicted_confind_contacts"][0].cpu().float().numpy().astype(np.float16)
+            except Exception as e:  # noqa: BLE001
+                print(f"[msa_pairformer] confind head skipped: {e}", flush=True)
     contact = res["predicted_cb_contacts"][0].cpu().float().numpy().astype(np.float16)
     print(f"[msa_pairformer] contact shape: {contact.shape}", flush=True)
 
+    extra = {"probs_confind": confind} if confind is not None else {}
     np.savez_compressed(
         out_dir / "contact.npz",
         probs=contact,
         length=np.int32(contact.shape[0]),
+        **extra,
     )
     print(f"[msa_pairformer] WROTE {out_dir / 'contact.npz'}", flush=True)
 

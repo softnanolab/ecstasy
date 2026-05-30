@@ -4,10 +4,12 @@ Reads a JSON bundle from stdin:
   { entry_id, sequences[], chain_ids[], msa_paths{} (ignored), out_dir, config }
 
 Bundle's "params" (all optional):
-  num_recycles        — recycle iterations (default ESMFold's 4)
-  chain_linker_length — linker residues between chains (default 25, ESMFold default)
-  chunk_size          — axial-attention chunk; reduces memory at small wallclock cost
-  contact_cutoff_bin  — distogram bin index below which Cβ-Cβ counts as contact.
+  num_recycles         — recycle iterations (default ESMFold's 4)
+  chain_linker_length  — poly-G linker residues between chains (default 25, ESMFold default)
+  residue_index_offset — positional-index jump between chains so the trunk treats them as
+                         separate chains (ESMFold default 512); applied in addition to the linker
+  chunk_size           — axial-attention chunk; reduces memory at small wallclock cost
+  contact_cutoff_bin   — distogram bin index below which Cβ-Cβ counts as contact.
                         ESMFold uses linspace(2.3125, 21.6875, 63) of squared distance
                         boundaries; bin 19 ≈ 8 Å (matches MENTOS's threshold).
 
@@ -38,6 +40,7 @@ def main():
 
     cutoff_bin: int = int(cfg.get("contact_cutoff_bin", 19))
     chain_linker_len: int = int(cfg.get("chain_linker_length", 25))
+    residue_index_offset: int = int(cfg.get("residue_index_offset", 512))
     num_recycles = cfg.get("num_recycles")
     chunk_size = cfg.get("chunk_size")
 
@@ -53,8 +56,14 @@ def main():
 
     seq = ":".join(sequences)
     chain_linker = "G" * chain_linker_len
+    print(f"[esmfold] linker={chain_linker_len}G  residue_index_offset={residue_index_offset}", flush=True)
     with torch.no_grad():
-        output, _ = model.infer(seq, num_recycles=num_recycles, chain_linker=chain_linker)
+        output, _ = model.infer(
+            seq,
+            num_recycles=num_recycles,
+            chain_linker=chain_linker,
+            residue_index_offset=residue_index_offset,
+        )
 
     logits = output["distogram_logits"][0]                 # (L_total, L_total, 64)
     probs = torch.softmax(logits.float(), dim=-1)
