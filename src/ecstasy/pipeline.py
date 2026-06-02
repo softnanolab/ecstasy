@@ -67,7 +67,7 @@ def make_run(dataset: str, model: str, preset: str | None = None,
                model=load_model(model, preset=preset, overrides=overrides))
 
 
-def run_predict(run: Run, limit: int | None = None) -> None:
+def run_predict(run: Run, limit: int | None = None, profile: bool = False) -> None:
     run.write_params()
     n = 0
     for entry in run.dataset.entries():
@@ -75,8 +75,12 @@ def run_predict(run: Run, limit: int | None = None) -> None:
             break
         n += 1
         out_dir = run.predictions_dir / entry.id
-        if (out_dir / "contact.npz").exists():
-            print(f"[skip] {entry.id} (contact.npz exists)")
+        # In profile mode a prior non-profile run may have left contact.npz without
+        # flops.json — don't skip until both exist.
+        done = (out_dir / "contact.npz").exists() and (
+            not profile or (out_dir / "flops.json").exists())
+        if done:
+            print(f"[skip] {entry.id} ({'contact.npz+flops.json' if profile else 'contact.npz'} exists)")
             continue
         msa = store.lookup(entry, run.model.msa) if run.model.needs_msa else None
         if run.model.needs_msa and not msa:
@@ -84,7 +88,7 @@ def run_predict(run: Run, limit: int | None = None) -> None:
                   file=sys.stderr)
         print(f"[predict] {entry.id} -> {out_dir/'contact.npz'}")
         try:
-            predict_one(run.model, entry, msa, out_dir)
+            predict_one(run.model, entry, msa, out_dir, profile=profile)
         except Exception as e:  # noqa: BLE001
             print(f"[error] {entry.id}: {e}", file=sys.stderr)
     print(f"\nDone. processed {n} entries -> {run.predictions_dir}")
@@ -143,8 +147,38 @@ def run_score(run: Run, limit: int | None = None) -> None:
     print(f"result -> {run.result_path}")
 
 
+def flops_summary(run_dir: Path) -> dict | None:
+    """Aggregate per-protein ``flops.json`` sidecars under ``run_dir/predictions``.
+
+    Returns the dataset-mean FLOPs (the x-coordinate paired with mean-P@K) plus
+    median and the 10/90 percentiles for the horizontal whisker (plan §3, §4), or
+    ``None`` if no sidecars exist. FLOPs are true FLOPs = 2*MACs.
+    """
+    vals = []
+    for fp in (run_dir / "predictions").glob("*/flops.json"):
+        try:
+            vals.append(float(json.loads(fp.read_text())["flops"]))
+        except (json.JSONDecodeError, KeyError, OSError):
+            continue
+    if not vals:
+        return None
+    a = np.array(vals)
+    return {
+        "n_flops": int(a.size),
+        "mean_flops": float(a.mean()),
+        "median_flops": float(np.median(a)),
+        "p10_flops": float(np.percentile(a, 10)),
+        "p90_flops": float(np.percentile(a, 90)),
+    }
+
+
 def run_compare(dataset: str) -> None:
-    """Aggregate every run's result.json for a dataset into a CSV + Markdown table."""
+    """Aggregate every run's result.json for a dataset into a CSV + Markdown table.
+
+    When a run also has per-protein ``flops.json`` sidecars (from ``run --profile``),
+    its dataset-mean inference FLOPs are folded in as the x-axis for the
+    P@K-vs-FLOPs plot.
+    """
     root = settings().runs_root / dataset
     files = sorted(root.glob("*/*/result.json"))
     if not files:
@@ -157,6 +191,7 @@ def run_compare(dataset: str) -> None:
         if "mean" not in summary:
             continue
         mean, median = summary["mean"], summary.get("median", {})
+        fl = flops_summary(p.parent) or {}
         rows.append({
             "model": data.get("model", p.parts[-3]),
             "variant": data.get("variant", p.parts[-2]),
@@ -168,6 +203,9 @@ def run_compare(dataset: str) -> None:
             "mean_P@K/2": mean.get("P@K/2", float("nan")),
             "mean_P@K/5": mean.get("P@K/5", float("nan")),
             "mean_AUC": mean.get("AUC", float("nan")),
+            "mean_flops": fl.get("mean_flops", float("nan")),
+            "median_flops": fl.get("median_flops", float("nan")),
+            "n_flops": fl.get("n_flops", 0),
         })
     if not rows:
         print(f"no result.json with summary metrics under {root}", file=sys.stderr)
@@ -175,7 +213,8 @@ def run_compare(dataset: str) -> None:
     rows.sort(key=lambda r: r["mean_P@K"], reverse=True)
 
     cols = ["model", "variant", "n", "skipped", "errors",
-            "mean_P@K", "median_P@K", "mean_P@K/2", "mean_P@K/5", "mean_AUC"]
+            "mean_P@K", "median_P@K", "mean_P@K/2", "mean_P@K/5", "mean_AUC",
+            "mean_flops", "median_flops", "n_flops"]
     csv_path = root / "comparison.csv"
     with csv_path.open("w") as f:
         f.write(",".join(cols) + "\n")
@@ -186,11 +225,14 @@ def run_compare(dataset: str) -> None:
     with md_path.open("w") as f:
         f.write(f"# {dataset} — interchain contact prediction\n\n")
         f.write(f"Aggregated from {len(rows)} run(s) under `{root}`.\n\n")
-        f.write("| model | variant | n | mean P@K | median P@K | P@K/2 | P@K/5 | AUC |\n")
-        f.write("|---|---|---|---|---|---|---|---|\n")
+        f.write("| model | variant | n | mean P@K | median P@K | P@K/2 | P@K/5 | AUC | "
+                "mean GFLOPs | n_flops |\n")
+        f.write("|---|---|---|---|---|---|---|---|---|---|\n")
         for r in rows:
+            gflops = r["mean_flops"] / 1e9
+            gf = f"{gflops:.1f}" if gflops == gflops else "—"   # NaN-safe
             f.write(f"| {r['model']} | {r['variant']} | {r['n']} | {r['mean_P@K']:.4f} | "
                     f"{r['median_P@K']:.4f} | {r['mean_P@K/2']:.4f} | {r['mean_P@K/5']:.4f} | "
-                    f"{r['mean_AUC']:.4f} |\n")
+                    f"{r['mean_AUC']:.4f} | {gf} | {r['n_flops']} |\n")
     print(f"wrote {csv_path}\nwrote {md_path}\n")
     print(md_path.read_text())

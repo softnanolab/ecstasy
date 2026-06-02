@@ -6,9 +6,13 @@ Each backend exposes ``prepare(datasets)``, ``submit(datasets)``, and
 another branch in a shared flow.
 """
 from ecstasy.msa.backends import boltz_csv
-from ecstasy.msa.backends import complex as _complex  # avoid shadowing the builtin
+from ecstasy.msa.backends import complex as _complex          # avoid shadowing the builtin
+from ecstasy.msa.backends import complex_api as _complex_api
 
+# kind -> backend. Two models, two distinct local pipelines — never conflate them
+# (see msa/README.md):
 BACKENDS = {
-    "boltz_csv": boltz_csv,   # Boltz-2: paired+unpaired per-chain CSVs (local colabfold_search)
-    "complex": _complex,      # MSA Pairformer: SI-faithful paired a3m (ColabFold API)
+    "boltz_csv": boltz_csv,       # Boltz-2: LOCAL colabfold_search -> paired+unpaired per-chain CSVs
+    "complex": _complex,          # MSA-Pairformer: LOCAL colabfold-local -> stitched complex a3m  (DEFAULT)
+    "complex_api": _complex_api,  # MSA-Pairformer: ColabFold API fallback (NOT used for the eval data)
 }

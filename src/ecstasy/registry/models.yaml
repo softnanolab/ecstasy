@@ -2,9 +2,15 @@
 # ${VAR} expands against ecstasy.config.Settings.
 #   runner          script under models/_runners/ run inside `env`
 #   env             venv whose bin/python executes the runner
-#   msa             none | per_chain (unpaired a3m, by seq-hash) | complex (paired a3m, by pair-hash)
-#                   | boltz_csv (paired+unpaired per-chain CSV, by pair-hash; reproduces
-#                     boltz --use_msa_server — a custom .a3m would drop ALL pairing)
+#   msa             none | per_chain (unpaired a3m, by seq-hash)
+#                   | boltz_csv  (Boltz-2: LOCAL colabfold_search -> paired+unpaired per-chain
+#                     CSV, by pair-hash; reproduces boltz --use_msa_server — a custom .a3m would
+#                     drop ALL pairing)
+#                   | complex    (MSA-Pairformer: LOCAL colabfold-local -> stitched complex a3m,
+#                     by pair-hash; how the eval MSAs were made)
+#                   | complex_api(MSA-Pairformer: ColabFold API fallback — NOT used for eval data)
+#                   boltz_csv and complex share the search engine but are DIFFERENT pipelines
+#                   for DIFFERENT models — never conflate. Full map: src/ecstasy/msa/README.md
 #   infra           machine knobs that do NOT affect outputs (excluded from the variant id)
 #   default_preset  preset used when --preset is omitted
 #   presets         named output-affecting parameter sets; pick by name, tweak with --set
@@ -18,6 +24,27 @@ boltz2:
   presets:
     full: {recycling_steps: 3, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
     fast: {recycling_steps: 1, sampling_steps: 10, diffusion_samples: 1, contact_cutoff_bin: 19}
+    # FLOPs recycle sweep: ONLY recycling_steps varies; sampling/diffusion held at the
+    # `full` defaults so the compute→P@K line isolates the recycle knob (plan §3, §6).
+    r0: {recycling_steps: 0, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    r1: {recycling_steps: 1, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    r3: {recycling_steps: 3, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    r5: {recycling_steps: 5, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+
+# Single-sequence Boltz-2 (no MSA): identical runner/presets to boltz2 but msa=none,
+# so the runner emits `msa: empty` per chain. Isolates how much Boltz leans on its MSA
+# (compare to boltz2 at each recycle) and is a clean single-seq baseline.
+boltz2_nomsa:
+  runner: boltz2_runner.py
+  env: ${ENVS_ROOT}/.venv-boltz
+  msa: none
+  infra: {num_workers: 0, devices: 1, no_kernels: true}
+  default_preset: r3
+  presets:
+    r0: {recycling_steps: 0, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    r1: {recycling_steps: 1, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    r3: {recycling_steps: 3, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
+    r5: {recycling_steps: 5, sampling_steps: 25, diffusion_samples: 1, contact_cutoff_bin: 19}
 
 esmfold:
   runner: esmfold_runner.py
@@ -28,13 +55,28 @@ esmfold:
     # 32-residue poly-G linker + 512 positional-index skip between chains (multimer hack)
     glinker32: {num_recycles: 4, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
     full: {num_recycles: 4, chain_linker_length: 25, residue_index_offset: 512, contact_cutoff_bin: 19}
+    # FLOPs recycle sweep: ONLY num_recycles varies; linker/offset held at glinker32.
+    r0: {num_recycles: 0, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
+    r1: {num_recycles: 1, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
+    r3: {num_recycles: 3, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
+    r5: {num_recycles: 5, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
 
 mentos:
   runner: mentos_runner.py
   env: ${ENVS_ROOT}/.venv-boltz          # where the mentos package is installed editable
   msa: none
-  default_preset: pretrain_8m_35m
+  default_preset: a5sgd6ul_latest
   presets:
+    # HEADLINE (user-chosen): a5sgd6ul "latest". The still-training run keeps every step
+    # checkpoint (un-pruned), so the latest *step* ckpt == last.ckpt content but is frozen
+    # (won't be rewritten). Config comes from $LOGS_DIR W&B run files (wandb-metadata.json
+    # fallback) via run_id. Pinned to step-96000 (== last.ckpt as of 2026-06-01 07:35,
+    # epoch 3); bump model_weights_path to a newer step before the big job if you want fresher.
+    a5sgd6ul_latest:
+      run_id: a5sgd6ul
+      model_weights_path: /projects/u6jv/harsh/MENTOS_META/LOGS/mentos/a5sgd6ul/checkpoints/epoch=3-step=96000.ckpt
+    # Stale 8M/35M preset (old architecture — MENTOS(cfg) raises Missing key pair_stack).
+    # Kept for provenance; do not use with the current code.
     pretrain_8m_35m:
       model_config_path: /projects/u6jv/harsh/MENTOS_META/LOGS/MINT_AFDD_PRETRAIN_8M_35M/3khmvobe/config.yaml
       model_weights_path: /projects/u6jv/harsh/MENTOS_META/LOGS/MINT_AFDD_PRETRAIN_8M_35M/3khmvobe/checkpoints/last.ckpt

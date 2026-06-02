@@ -37,8 +37,9 @@ def test_unknown_dataset_raises():
 
 
 def test_models_registered_with_presets():
-    assert set(model_names()) == {"boltz2", "esmfold", "mentos", "colabfold", "msa_pairformer"}
-    assert presets_for("boltz2") == ["fast", "full"]
+    assert set(model_names()) == {"boltz2", "boltz2_nomsa", "esmfold", "mentos",
+                                  "colabfold", "msa_pairformer"}
+    assert presets_for("boltz2") == ["fast", "full", "r0", "r1", "r3", "r5"]
 
 
 def test_default_preset_and_variant():
@@ -86,7 +87,8 @@ def test_variant_distinguishes_different_overrides():
 
 def test_msa_backends_registered():
     from ecstasy.msa.backends import BACKENDS
-    assert set(BACKENDS) == {"boltz_csv", "complex"}
+    # boltz_csv (Boltz-2) + complex (MSA-Pairformer local, default) + complex_api (API fallback)
+    assert set(BACKENDS) == {"boltz_csv", "complex", "complex_api"}
     for b in BACKENDS.values():
         assert all(hasattr(b, fn) for fn in ("prepare", "submit", "ingest"))
 

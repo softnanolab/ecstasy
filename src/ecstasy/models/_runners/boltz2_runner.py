@@ -59,6 +59,7 @@ def main():
     cfg = bundle.get("params") or {}        # output-affecting params (preset + overrides)
     infra = bundle.get("infra") or {}       # machine knobs (devices/num_workers/no_kernels)
     cutoff_bin: int = int(cfg.get("contact_cutoff_bin", 19))
+    profile = bool(bundle.get("profile"))
 
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = out_dir / "raw"
@@ -68,24 +69,44 @@ def main():
     yaml_path = yaml_dir / f"{entry_id}.yaml"
     yaml_path.write_text(_emit_yaml(entry_id, sequences, chain_ids, msa_paths))
 
-    boltz_bin = Path(sys.executable).parent / "boltz"
-    cmd = [
-        str(boltz_bin), "predict", str(yaml_dir),
-        "--out_dir", str(raw_dir),
-        "--model", "boltz2",
-        "--devices", str(infra.get("devices", 1)),
-        "--recycling_steps", str(cfg.get("recycling_steps", 3)),
-        "--sampling_steps", str(cfg.get("sampling_steps", 25)),
-        "--diffusion_samples", str(cfg.get("diffusion_samples", 1)),
-        "--num_workers", str(infra.get("num_workers", 0)),
-        "--output_format", "mmcif",
-        "--override",
-        "--dump_distogram",
-    ]
-    if infra.get("no_kernels", True):
-        cmd.append("--no_kernels")
-    print("RUN:", " ".join(cmd), flush=True)
-    subprocess.run(cmd, check=True)
+    recycling_steps = int(cfg.get("recycling_steps", 3))
+    no_kernels = bool(infra.get("no_kernels", True))
+    if profile:
+        # Trunk-only FLOP profiling: run boltz in-process with structure skipped
+        # (diffusion never runs; the distogram, computed before diffusion, is
+        # identical). Produces distogram_<id>.npz + flops_<id>.json under raw_dir.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import _boltz_profile
+        print(f"[boltz2] PROFILE trunk-only forward (recycling_steps={recycling_steps}, "
+              f"no_kernels={no_kernels})", flush=True)
+        _boltz_profile.run_profiled_predict(
+            yaml_dir, raw_dir,
+            recycling_steps=recycling_steps,
+            sampling_steps=int(cfg.get("sampling_steps", 25)),
+            diffusion_samples=int(cfg.get("diffusion_samples", 1)),
+            no_kernels=no_kernels,
+            devices=int(infra.get("devices", 1)),
+            num_workers=int(infra.get("num_workers", 0)),
+        )
+    else:
+        boltz_bin = Path(sys.executable).parent / "boltz"
+        cmd = [
+            str(boltz_bin), "predict", str(yaml_dir),
+            "--out_dir", str(raw_dir),
+            "--model", "boltz2",
+            "--devices", str(infra.get("devices", 1)),
+            "--recycling_steps", str(recycling_steps),
+            "--sampling_steps", str(cfg.get("sampling_steps", 25)),
+            "--diffusion_samples", str(cfg.get("diffusion_samples", 1)),
+            "--num_workers", str(infra.get("num_workers", 0)),
+            "--output_format", "mmcif",
+            "--override",
+            "--dump_distogram",
+        ]
+        if no_kernels:
+            cmd.append("--no_kernels")
+        print("RUN:", " ".join(cmd), flush=True)
+        subprocess.run(cmd, check=True)
 
     distogram_paths = list(raw_dir.glob(f"**/distogram_{entry_id}.npz"))
     if not distogram_paths:
@@ -100,6 +121,32 @@ def main():
     )
     shutil.rmtree(yaml_dir, ignore_errors=True)
     print(f"WROTE {out_dir / 'contact.npz'}  shape={contact.shape}  cutoff_bin={cutoff_bin}", flush=True)
+
+    if profile:
+        flops_paths = list(raw_dir.glob(f"**/flops_{entry_id}.json"))
+        if not flops_paths:
+            raise FileNotFoundError(f"profile mode but no flops_{entry_id}.json under {raw_dir}")
+        payload = json.loads(flops_paths[0].read_text())
+        by_module = payload.get("by_module") or {}
+        # Hard sanity: the diffusion sampler must NOT run under skip_run_structure.
+        diffusion = sum(v for k, v in by_module.items()
+                        if k.split(".")[-1] in ("structure_module", "diffusion_conditioning"))
+        if diffusion:
+            raise RuntimeError(f"diffusion subtree counted {diffusion} FLOPs — skip_run_structure "
+                               "failed; the trunk-only count would be wrong")
+        # Confidence/bfactor heads still run but were subtracted in _boltz_profile (off-path).
+        if payload.get("off_path_flops"):
+            print(f"[boltz2] off-path heads subtracted: {payload['off_path_flops']:.3e} FLOPs "
+                  f"(confidence/bfactor)", flush=True)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import _flops
+        sidecar = _flops.write_flops_sidecar(
+            out_dir,
+            {k: payload[k] for k in ("flops", "macs", "flops_total", "off_path_flops", "by_module")
+             if k in payload},
+            L=int(contact.shape[0]), msa_depth=None, recycles=recycling_steps, model="boltz2",
+        )
+        print(f"WROTE {sidecar}  flops={payload['flops']:.3e}", flush=True)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,15 @@ val_seq_chain:      # V1 MMseqs cluster @ 30% seq id, chain-level   (631)
 val_seq_pair:       # V2 MMseqs cluster, pair identity              (945)
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
+
+# Chain-order-permutation experiment: val_seq_pair with each dimer's chains flipped
+# (A,B)->(B,A), GT reindexed to match. ISOLATED (own run dir + own pair-hash MSAs, so
+# MSAs get recalculated from scratch for the flipped order). Tests model order-dependence.
+val_seq_pair_swapped:
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
+  swap_chains: true
+
 val_pinder_chain:   # V3 depth-2 walk, fused interface-monomer graph (98)
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_chain/index.parquet

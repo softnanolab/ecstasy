@@ -45,10 +45,16 @@ class Ecstasy:
             print(f"  {m:16} msa={mr.msa:9} env={mr.env.name:14} presets={presets_for(m)}")
 
     def msa(self, datasets, kind, phase="prepare", a3m_dir=None):
-        """Populate the shared MSA store via colabfold-local.
+        """Populate the shared MSA store for a given `kind`.
 
-        phase: prepare (write missing-chains FASTA), submit (sbatch colabfold),
-               or ingest (copy resulting a3ms into the store).
+        kind: boltz_csv (Boltz-2 per-chain CSVs, local colabfold_search) |
+              complex (MSA-Pairformer stitched a3m, local colabfold-local) |
+              complex_api (MSA-Pairformer via the ColabFold API — fallback only).
+        Each model uses a DIFFERENT pipeline; see src/ecstasy/msa/README.md.
+
+        phase: prepare (write missing-complex FASTA/manifest), submit (sbatch the
+               local search; complex_api fetches inline), or ingest (assemble/copy
+               results into the store).
         """
         from ecstasy.msa import generate
         ds = _as_list(datasets)
@@ -61,11 +67,16 @@ class Ecstasy:
         else:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
-    def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False):
-        """Predict (and score, unless --no_score) over the dataset×model matrix."""
+    def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
+            profile=False):
+        """Predict (and score, unless --no_score) over the dataset×model matrix.
+
+        --profile additionally measures inference FLOPs and writes a flops.json
+        sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
+        """
         for r in _matrix(dataset, model, preset, set):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
-            pipeline.run_predict(r, limit=limit)
+            pipeline.run_predict(r, limit=limit, profile=profile)
             if not no_score:
                 pipeline.run_score(r, limit=limit)
 

@@ -21,12 +21,21 @@ class MentosSquareDataset(Dataset):
     kind = "mentos_square"
 
     def __init__(self, name: str, index: str, gt_root: str, split: str = "val",
-                 contact_bin: int = 5):
+                 contact_bin: int = 5, swap_chains: bool = False):
         super().__init__(name)
         self.index = Path(index)
         self.gt_root = Path(gt_root)
         self.split = split
         self.contact_bin = int(contact_bin)
+        # swap_chains: chain-order-permutation experiment. Reverse each dimer's chain
+        # order (A,B)->(B,A) at input AND reindex the square GT to match, so the model
+        # is scored on the same interface seen in flipped order. Monomers pass through.
+        self.swap_chains = bool(swap_chains)
+
+    @staticmethod
+    def _swap_perm(la: int, L: int) -> np.ndarray:
+        # new concat order = chainB (orig [la:L)) then chainA (orig [0:la))
+        return np.r_[np.arange(la, L), np.arange(0, la)]
 
     def entries(self) -> Iterable[Entry]:
         import pandas as pd
@@ -35,6 +44,8 @@ class MentosSquareDataset(Dataset):
         df = df[df["split"] == self.split]
         for row in df.itertuples():
             seqs = tuple(row.sequences)
+            if self.swap_chains and len(seqs) == 2:
+                seqs = (seqs[1], seqs[0])
             chain_ids = tuple(["A", "B"][: len(seqs)])
             yield Entry(id=str(row.id), sequences=seqs, chain_ids=chain_ids)
 
@@ -50,8 +61,13 @@ class MentosSquareDataset(Dataset):
         # (raw >= 0). Unresolved (-1) pairs are dropped from the candidate pool so they
         # never count as negatives (matches mentos.metrics_inter_chain).
         valid = raw >= 0
-        return {"contact_map": contact_map, "valid": valid,
-                "sequences": list(sample.sequences)}
+        seqs = list(sample.sequences)
+        if self.swap_chains and len(seqs) == 2:
+            perm = self._swap_perm(len(seqs[0]), contact_map.shape[0])
+            contact_map = contact_map[np.ix_(perm, perm)]
+            valid = valid[np.ix_(perm, perm)]
+            seqs = [seqs[1], seqs[0]]
+        return {"contact_map": contact_map, "valid": valid, "sequences": seqs}
 
     def score(self, entry: Entry, contact_path: Path) -> dict[str, float]:
         d = np.load(contact_path)
