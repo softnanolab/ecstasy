@@ -16,9 +16,16 @@ from ecstasy.datasets.base import Entry
 from ecstasy.models.registry import ModelRun
 
 
-def predict_one(model: ModelRun, entry: Entry, msa, out_dir: Path) -> Path:
+def predict_one(model: ModelRun, entry: Entry, msa, out_dir: Path,
+                profile: bool = False) -> Path:
     """Run `model` on `entry`. `msa` is a {chain_id: a3m} dict (per_chain),
-    a single a3m path (complex), or None."""
+    a single a3m path (complex), or None.
+
+    `profile=True` asks the runner to additionally measure inference FLOPs and
+    write a `flops.json` sidecar next to `contact.npz` (see FLOPS_BENCHMARK_PLAN.md).
+    It is a measurement mode, not an output-affecting param, so it is passed as a
+    top-level bundle field — never folded into the variant id.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bundle = {
@@ -30,6 +37,7 @@ def predict_one(model: ModelRun, entry: Entry, msa, out_dir: Path) -> Path:
         "out_dir": str(out_dir),
         "params": model.params,
         "infra": model.infra,
+        "profile": bool(profile),
     }
     python = model.env / "bin" / "python"
     if not python.exists():

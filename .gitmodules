@@ -15,3 +15,6 @@
 [submodule "modules/msa_pairformer"]
 	path = modules/msa_pairformer
 	url = git@github.com:softnanolab/MSA_Pairformer.git
+[submodule "third_party/colabfold-local"]
+	path = third_party/colabfold-local
+	url = git@github.com:softnanolab/colabfold-local.git

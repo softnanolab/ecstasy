@@ -4,9 +4,15 @@ Backends live in ``msa/backends/`` (one module per ``kind``), each exposing
 ``prepare``/``submit``/``ingest``. This module is just the registry + dispatch:
 
   prepare(datasets, kind)  collect store-missing complexes, write a work FASTA.
-  submit(datasets, kind)   launch generation (SLURM for boltz_csv; inline ColabFold
-                           API fetch for complex).
+  submit(datasets, kind)   launch generation. LOCAL routes sbatch a GPU job:
+                           boltz_csv (colabfold_search) and complex (colabfold-local).
+                           complex_api is the only network route (inline ColabFold API).
   ingest(datasets, kind)   assemble/verify the generated MSAs into the store.
+
+kinds: boltz_csv -> Boltz-2 (per-chain CSVs); complex -> MSA-Pairformer (local
+colabfold-local; the default + how the eval data was made); complex_api -> API
+fallback. boltz_csv and complex use the SAME search engine but produce different
+outputs for different models — never conflate them. See msa/README.md.
 
 Add a kind = add a backend module + one ``BACKENDS`` entry; no new branches here.
 """

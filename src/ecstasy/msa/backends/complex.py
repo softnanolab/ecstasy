@@ -1,115 +1,151 @@
-"""complex MSA backend — SI-faithful MSA Pairformer paired MSA via the ColabFold API.
+"""complex MSA backend — LOCAL MSA-Pairformer paired MSA via softnanolab/colabfold-local.
 
-Reproduces the MSA Pairformer notebook/SI MMseqs2 route (separate from boltz_csv):
-  heterodimer -> /ticket/pair paircomplete-pairfilterprox_20 -> save_msa filters
-                 (coverage>=0.75, query-identity>=0.30, genomic-distance<=20) -> stitch
-  homodimer   -> /ticket/msa unpaired -> tile each row (s|s)
-Writes one ``#L1,L2\\t1,1``-headed a3m per complex to the store; the depth cap (512,
-hhfilter) happens at model load in the runner. Needs network egress to
-api.colabfold.com — run on a node with internet (login or internet-capable compute).
+This is how the benchmark's MSA-Pairformer MSAs were actually generated — NOT the
+ColabFold API (that's the separate ``complex_api`` backend). Pipeline: colabfold-local's
+``get_paired_msa_local()`` runs local ``colabfold_search`` (mmseqs-gpu) against
+``COLABFOLD_DBS`` and stitches one ``#L1,L2\\t1,1``-headed complex a3m per pair into the
+store. The paired-sequence filter + chain-aware diversity selection + depth cap (512)
+happen later, at model load in ``msa_pairformer_runner.py`` — not here.
 
-Backend interface: ``prepare(datasets) -> Path``, ``submit(datasets) -> None``
-(fetches inline, concurrently), ``ingest(datasets, out_dir=None) -> None`` (reports
-coverage; the fetch writes straight to the store).
+Do NOT confuse this with ``boltz_csv`` (Boltz-2): same search engine, but boltz_csv keeps
+paired+unpaired per-chain CSVs to reproduce ``boltz --use_msa_server``, whereas this
+emits a single stitched complex a3m for MSA-Pairformer. See ``msa/README.md``.
+
+Needs a GPU node + a colabfold-local checkout (the ``third_party/colabfold-local``
+submodule, or ``$COLABFOLD_LOCAL_DIR``) and its venv (``$COLABFOLD_LOCAL_VENV``),
+pinned at the SHA recorded in ``msa/README.md``.
+
+Backend interface: ``prepare(datasets) -> Path``, ``submit(datasets) -> job|None``
+(sbatch), ``ingest(datasets, out_dir=None) -> None`` (copy a3ms into the store).
 """
 from __future__ import annotations
 
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+import subprocess
 from pathlib import Path
 
-from ecstasy.config import env_value
-from ecstasy.msa import colabfold as _cf
+from ecstasy.config import env_value, settings
 from ecstasy.msa import store
 from ecstasy.msa.backends._common import collect_complexes, work_dir
+from ecstasy.msa.backends.boltz_csv import _colabfold_paths  # shared mmseqs/dbs/cuda/partition
+
+_DRIVER = Path(__file__).resolve().parent / "_complex_local_driver.py"
 
 
-def _header_and_rows(session, seqs: list[str]) -> tuple[str, list[tuple[str, str]]]:
-    cleaned = [_cf.clean_sequence(s) for s in seqs]
-    lengths = ",".join(str(len(s)) for s in cleaned)
-    header = f"#{lengths}\t{','.join('1' for _ in cleaned)}"
-    uniq = list(dict.fromkeys(cleaned))
-    if len(uniq) == 1:
-        # homodimer/homo-oligomer: tile the single-chain unpaired MSA
-        jid = _cf.submit_msa(session, _cf.make_query_fasta([uniq[0]]), mode="env")
-        _cf.poll_until_done(session, jid)
-        chain_seqs = _cf.parse_unpaired_a3m_bytes(_cf.download_results(session, jid))
-        L, n = len(uniq[0]), len(cleaned)
-        rows = [("query" if i == 0 else f"hom{i}", s * n)
-                for i, s in enumerate(chain_seqs) if len(s) == L]
-        return header, rows
-    # heterodimer: paired prox_20 + save_msa filters + stitch
-    jid = _cf.submit_pair(session, _cf.make_query_fasta(cleaned), mode=_cf.DEFAULT_MODE)
-    _cf.poll_until_done(session, jid)
-    per_chain = _cf.parse_paired_a3m_bytes(_cf.download_results(session, jid), extract_metadata=True)
-    rows, _stats = _cf.apply_save_msa_filters(per_chain, [len(s) for s in cleaned], _cf.SaveMsaFilters())
-    return header, rows
+def _colabfold_local_dir() -> Path:
+    """Resolve the colabfold-local checkout: $COLABFOLD_LOCAL_DIR, else the in-repo
+    submodule, else ~/colabfold-local (documented fallback)."""
+    explicit = env_value("COLABFOLD_LOCAL_DIR")
+    if explicit:
+        return Path(explicit)
+    repo_root = Path(__file__).resolve().parents[4]   # …/src/ecstasy/msa/backends/complex.py -> repo
+    sub = repo_root / "third_party" / "colabfold-local"
+    if sub.exists():
+        return sub
+    return Path.home() / "colabfold-local"
 
 
-def _fetch_one(v: dict) -> int:
-    """Fetch+filter+stitch one complex into the store; -1 if already present."""
-    import requests
-    dst = store.path_for_pair(v["seqs"])
-    if dst.exists():
-        return -1
-    header, rows = _header_and_rows(requests.Session(), v["seqs"])
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_suffix(".a3m.tmp")          # write-then-rename so partials never look "done"
-    with tmp.open("w") as f:
-        f.write(header + "\n")
-        for hdr, seq in rows:
-            f.write(f">{hdr}\n{seq}\n")
-    tmp.rename(dst)
-    return len(rows)
+def _colabfold_local_venv(cl_dir: Path) -> str:
+    explicit = env_value("COLABFOLD_LOCAL_VENV")
+    if explicit:
+        return explicit
+    for cand in (".venv", "venv", ".venv-colabfold"):
+        if (cl_dir / cand / "bin" / "activate").exists():
+            return str(cl_dir / cand)
+    return str(cl_dir / ".venv")
+
+
+def _manifest_path() -> Path:
+    return work_dir("complex") / "manifest.json"
 
 
 def prepare(datasets: list[str]) -> Path:
-    """List store-missing complexes (writes a FASTA for reference)."""
+    """List store-missing complexes; write a reference FASTA + a driver manifest."""
     store.complex_dir().mkdir(parents=True, exist_ok=True)
     items = collect_complexes(datasets)
     missing = {h: v for h, v in items.items() if not store.path_for_pair(v["seqs"]).exists()}
-    work = work_dir("complex"); work.mkdir(parents=True, exist_ok=True)
+    work = work_dir("complex")
+    work.mkdir(parents=True, exist_ok=True)
     fasta = work / "missing.fasta"
     with fasta.open("w") as f:
         for h, v in sorted(missing.items()):
-            f.write(f">{v['header']}\n{v['query']}\n")
+            f.write(f">{v['header']}\n{v['query']}\n")   # query == 'seqA:seqB' (colabfold-local format)
+    manifest = [{"seqs": v["seqs"], "header": v["header"],
+                 "dst": str(store.path_for_pair(v["seqs"]))} for v in missing.values()]
+    _manifest_path().write_text(json.dumps(manifest))
     print(f"[msa:complex] datasets={datasets}")
     print(f"[msa:complex] unique={len(items)} already_in_store={len(items)-len(missing)} missing={len(missing)}")
-    print(f"[msa:complex] wrote {fasta}; run --phase submit to fetch from api.colabfold.com (needs network)")
+    print(f"[msa:complex] wrote {fasta} + manifest; --phase submit sbatches colabfold-local (local, GPU)")
     return fasta
 
 
-def submit(datasets: list[str]) -> None:
-    """Fetch missing complexes from the ColabFold API into the store, concurrently.
+def _write_sbatch() -> Path:
+    p = _colabfold_paths()
+    cl_dir = _colabfold_local_dir()
+    cl_venv = _colabfold_local_venv(cl_dir)
+    work = work_dir("complex")
+    (work / "logs").mkdir(parents=True, exist_ok=True)
+    script = work / "generate_complex.sbatch"
+    script.write_text(f"""#!/usr/bin/env bash
+#SBATCH --job-name=ecstasy-msa-complex
+#SBATCH --output={work}/logs/msa_%j.out
+#SBATCH --error={work}/logs/msa_%j.err
+#SBATCH --gpus-per-node=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=32
+#SBATCH --time=12:00:00
+#SBATCH --partition={p['partition']}
+set -euo pipefail
 
-    Resumable (skips complexes already present), tolerant of per-complex errors.
-    ``COMPLEX_FETCH_WORKERS`` (default 4) concurrent API jobs; each colabfold call
-    backs off on 429, so modest concurrency stays polite.
-    """
-    workers = int(env_value("COMPLEX_FETCH_WORKERS", "4"))
-    items = collect_complexes(datasets)
-    store.complex_dir().mkdir(parents=True, exist_ok=True)
-    missing = [v for v in items.values() if not store.path_for_pair(v["seqs"]).exists()]
-    print(f"[msa:complex] fetching {len(missing)} of {len(items)} complexes "
-          f"from api.colabfold.com ({workers} workers)", flush=True)
-    done = errors = 0
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(_fetch_one, v): v["header"] for v in missing}
-        for n, fut in enumerate(as_completed(futs), 1):
-            h = futs[fut]
-            try:
-                if fut.result() >= 0:
-                    done += 1
-            except Exception as e:  # noqa: BLE001
-                errors += 1
-                print(f"[msa:complex] ERROR {h}: {e}", file=sys.stderr, flush=True)
-            if n % 25 == 0 or n == len(missing):
-                print(f"[msa:complex] {n}/{len(missing)} (done={done} errors={errors})", flush=True)
-    print(f"[msa:complex] done: wrote={done} errors={errors}")
+module load {p['cuda_module']}
+# colabfold-local venv (get_paired_msa_local deps); .venv-colabfold supplies colabfold_search.
+# shellcheck disable=SC1091
+source "{cl_venv}/bin/activate"
+export PATH="{p['venv']}/bin:$PATH"
+export COLABFOLD_LOCAL_DIR="{cl_dir}"
+export DATA_DIR="{p['dbs']}"      # local ColabFold DBs (override colabfold-local's default)
+export MMSEQS_BIN="{p['mmseqs']}" # ecstasy's vendored mmseqs-gpu
+
+python "{_DRIVER}" "{_manifest_path()}"
+echo "DONE complex (colabfold-local) MSA generation"
+""")
+    return script
+
+
+def submit(datasets: list[str]) -> str | None:
+    """prepare(), then sbatch the local colabfold-local generation (GPU)."""
+    fasta = prepare(datasets)
+    if fasta.stat().st_size == 0:
+        print("[msa:complex] nothing missing; store is complete")
+        return None
+    script = _write_sbatch()
+    res = subprocess.run(["sbatch", "--parsable", str(script)],
+                         capture_output=True, text=True, check=True)
+    job = res.stdout.strip()
+    print(f"[msa:complex] submitted job {job} ({script}); writes straight to the store. "
+          f"--phase ingest afterwards only verifies coverage.")
+    return job
 
 
 def ingest(datasets: list[str], out_dir: str | None = None) -> None:
-    """Report store coverage (the fetch in `submit` writes straight to the store)."""
+    """Copy externally-generated a3ms into the store, or report coverage.
+
+    If ``out_dir`` is given (e.g. a manual ``colabfold-local`` run, a3ms named
+    ``<pair_hash>.a3m``), copy any matching missing complexes into the store. The
+    sbatch path in ``submit`` writes straight to the store, so it needs no copy.
+    """
     items = collect_complexes(datasets)
+    copied = 0
+    if out_dir:
+        src = Path(out_dir)
+        for v in items.values():
+            dst = store.path_for_pair(v["seqs"])
+            cand = src / f"{v['header']}.a3m"
+            if not dst.exists() and cand.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text(cand.read_text())
+                copied += 1
     have = sum(1 for v in items.values() if store.path_for_pair(v["seqs"]).exists())
+    if out_dir:
+        print(f"[msa:complex] copied {copied} a3ms from {out_dir}")
     print(f"[msa:complex] store coverage: {have}/{len(items)} complexes")

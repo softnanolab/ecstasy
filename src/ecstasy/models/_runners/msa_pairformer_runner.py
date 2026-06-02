@@ -85,6 +85,10 @@ def main():
     max_msa_depth: int = int(cfg.get("max_msa_depth", 512))
     weights_dir = cfg.get("weights_dir")
     hhfilter_bin = cfg.get("hhfilter_bin")
+    profile = bool(bundle.get("profile"))
+    if profile:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import _flops
     # complex paired a3m: the pipeline resolves it from the shared MSA store and
     # passes the path directly; fall back to a config dir, then single-sequence.
     complex_a3m = bundle.get("complex_a3m") or cfg.get("complex_a3m")
@@ -181,9 +185,16 @@ def main():
         complex_chain_break_indices=[chain_breaks] if chain_breaks else None,
         return_seq_weights=True,
     )
+    flops_payload = None
     with torch.no_grad(), autocast_ctx:
         # Cb-Cb head (layer 15) — the definition-matched, scored map (vs MENTOS Cb<8A GT).
-        res = model.predict_cb_contacts(**mk)
+        # Profile ONLY this call: it is the scored map's whole dependency graph (trunk
+        # through the layer-15 Cβ head). The confind head below is a separate secondary
+        # column and is deliberately excluded from the FLOP count.
+        if profile:
+            res, flops_payload = _flops.profile_call(model.predict_cb_contacts, **mk)
+        else:
+            res = model.predict_cb_contacts(**mk)
         # ConFind head (layer 18) — free secondary column (side-chain-contact definition).
         confind = None
         if hasattr(model, "predict_confind_contacts"):
@@ -203,6 +214,15 @@ def main():
         **extra,
     )
     print(f"[msa_pairformer] WROTE {out_dir / 'contact.npz'}", flush=True)
+
+    if profile and flops_payload is not None:
+        sidecar = _flops.write_flops_sidecar(
+            out_dir, flops_payload,
+            L=int(contact.shape[0]), msa_depth=int(n_seqs), recycles=None,
+            model="msa_pairformer",
+        )
+        print(f"[msa_pairformer] WROTE {sidecar}  flops={flops_payload['flops']:.3e}  "
+              f"msa_depth={n_seqs}", flush=True)
 
 
 if __name__ == "__main__":

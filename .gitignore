@@ -19,3 +19,8 @@ resources/pdb_features.json
 test.ipynb
 # local machine paths + secrets (never commit)
 .env
+
+# Run-specific SLURM wrappers hardcode cluster/job paths — keep them local, not
+# committed. Document the equivalent commands in scripts/README.md instead.
+scripts/*.sbatch
+!scripts/run_experiment.sbatch
