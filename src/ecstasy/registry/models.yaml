@@ -72,9 +72,17 @@ mentos:
     # (won't be rewritten). Config comes from $LOGS_DIR W&B run files (wandb-metadata.json
     # fallback) via run_id. Pinned to step-96000 (== last.ckpt as of 2026-06-01 07:35,
     # epoch 3); bump model_weights_path to a newer step before the big job if you want fresher.
+    # a5sgd6ul_latest uses the run's native pair_stack.num_recycles = 1 (so it is the
+    # r=1 point — 2 pair-stack passes with the distogram-recycle feedback).
     a5sgd6ul_latest:
       run_id: a5sgd6ul
       model_weights_path: /projects/u6jv/harsh/MENTOS_META/LOGS/mentos/a5sgd6ul/checkpoints/epoch=3-step=96000.ckpt
+    # Same weights, num_recycles overridden to 0 (single pass, distogram_recycle off) —
+    # the r=0 point of the MENTOS recycle sweep.
+    a5sgd6ul_r0:
+      run_id: a5sgd6ul
+      model_weights_path: /projects/u6jv/harsh/MENTOS_META/LOGS/mentos/a5sgd6ul/checkpoints/epoch=3-step=96000.ckpt
+      num_recycles: 0
     # Stale 8M/35M preset (old architecture — MENTOS(cfg) raises Missing key pair_stack).
     # Kept for provenance; do not use with the current code.
     pretrain_8m_35m:

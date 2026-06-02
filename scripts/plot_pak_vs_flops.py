@@ -145,21 +145,25 @@ def _display_name(model: str) -> str:
     return _DISPLAY_NAME.get(model, model)
 
 
-# Single-forward models have no recycle knob; their one preset IS the r=0 point.
-# Relabel it "r=0 full" so it reads on the same footing as the r0 sweep points.
-_R0_FULL_MODELS = {"mentos", "msa_pairformer"}
+# MSA-Pairformer is a genuine single forward (no recycle loop) -> its one preset is r=0.
+# MENTOS recycles pair_stack.num_recycles passes: a5sgd6ul_latest = num_recycles 1 (r=1),
+# a5sgd6ul_r0 = overridden to 0 (r=0). Map each variant to its true recycle label.
+_R0_FULL_MODELS = {"msa_pairformer"}
+_MENTOS_LABEL = {"a5sgd6ul_latest": "r=1 full", "a5sgd6ul_r0": "r=0 full"}
 
 
 def _disp_variant(model: str, variant: str) -> str:
+    if model == "mentos":
+        return _MENTOS_LABEL.get(variant, variant)
     if model in _R0_FULL_MODELS:
         return "r=0 full"
     return variant
 
 
 def _is_r0_rep(model: str, variant: str) -> bool:
-    """The r=0 representative of a model: its r0 sweep point, or (for single-forward
-    models) its only preset."""
-    return variant == "r0" or model in _R0_FULL_MODELS
+    """The r=0 representative of a model: its r0 sweep point (incl. MENTOS a5sgd6ul_r0),
+    or (for single-forward models) its only preset."""
+    return variant in ("r0", "a5sgd6ul_r0") or model in _R0_FULL_MODELS
 
 
 def _pareto(pts: list[dict]) -> list[dict]:
