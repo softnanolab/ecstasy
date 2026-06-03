@@ -75,18 +75,26 @@ def _paks(cprob: np.ndarray, gt_bins: np.ndarray, la: int, lb: int) -> tuple[flo
     return inter, (float(np.mean(intra_vals)) if intra_vals else float("nan"))
 
 
-def _overlay_rgb(gt_bins: np.ndarray, argmax: np.ndarray | None = None, blend: float = 0.70) -> np.ndarray:
-    """White-background RGB image: GT contacts in black, predicted (if given) in red.
+LIGHT_BLUE = (0.40, 0.72, 1.0)  # "correct prediction" (TP) colour in --overlay mode
 
-    white = neither, black = GT-only, light red = predicted-only (FP), dark red = both.
-    Pass ``argmax=None`` for a GT-only panel.
+
+def _overlay_rgb(gt_bins: np.ndarray, argmax: np.ndarray | None = None) -> np.ndarray:
+    """White-background RGB image comparing GT and predicted contacts (3-class).
+
+    white = neither, black = GT-only (missed/FN), red = predicted-only (FP),
+    light blue = both (correct/TP). Pass ``argmax=None`` for a GT-only reference
+    panel (all GT contacts shown black).
     """
     L = gt_bins.shape[0]
-    img = np.ones((L, L, 3))
-    img[(gt_bins >= 0) & (gt_bins < CONTACT_BIN)] = (0.0, 0.0, 0.0)
-    if argmax is not None:
-        pred = argmax < CONTACT_BIN
-        img[pred] = (1 - blend) * img[pred] + blend * np.array([1.0, 0.0, 0.0])
+    gt = (gt_bins >= 0) & (gt_bins < CONTACT_BIN)
+    img = np.ones((L, L, 3))  # white = neither
+    if argmax is None:
+        img[gt] = (0.0, 0.0, 0.0)
+        return img
+    pred = argmax < CONTACT_BIN
+    img[gt & ~pred] = (0.0, 0.0, 0.0)    # missed GT (FN)
+    img[pred & ~gt] = (1.0, 0.0, 0.0)    # false positive (FP)
+    img[gt & pred] = LIGHT_BLUE          # correct (TP)
     return img
 
 
@@ -158,12 +166,12 @@ def main() -> None:
 
     if overlay:
         from matplotlib.patches import Patch
-        fig.legend(handles=[Patch(facecolor="black", label="GT contact"),
-                            Patch(facecolor=(1.0, 0.30, 0.30), label="Predicted only (FP)"),
-                            Patch(facecolor=(0.30, 0.0, 0.0), label="Both (correct)")],
+        fig.legend(handles=[Patch(facecolor="black", label="GT only (missed)"),
+                            Patch(facecolor=(1.0, 0.0, 0.0), label="Predicted only (FP)"),
+                            Patch(facecolor=LIGHT_BLUE, label="Both (correct)")],
                    loc="lower center", ncol=3, frameon=False, fontsize=10)
-        fig.suptitle("MENTOS distogram evolution — GT (black) vs predicted (bright red) contacts "
-                     "[white = none; dark red = correct; grey lines = chain boundary]", fontsize=13)
+        fig.suptitle("MENTOS distogram evolution — GT vs predicted contacts "
+                     "[white = none; black = missed GT; red = false positive; light blue = correct]", fontsize=13)
     elif args.binary:
         fig.suptitle("MENTOS distogram evolution — predicted contacts (binary: argmax bin < ~8 Å; "
                      "black = contact; boundary lines = chain split)", fontsize=13)
