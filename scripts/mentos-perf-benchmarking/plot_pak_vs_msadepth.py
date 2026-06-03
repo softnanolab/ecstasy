@@ -30,7 +30,7 @@ SPLITS = ["val_seq_chain", "val_seq_pair", "val_pinder_chain", "val_pinder_pair"
 MODELS = [("boltz2", "r3", "Boltz2 (with MSAs)"),
           ("msa_pairformer", "full", "MSA-Pairformer"),
           ("esmfold", "r3", "ESMFold"),
-          ("mentos", "a5sgd6ul_latest", "MENTOS"),
+          ("mentos", "a5sgd6ul_s90k", "MENTOS"),
           ("boltz2_nomsa", "r3", "Boltz2 (no MSAs)")]
 _BINS = {  # well-populated bin edges per depth mode (distributions differ a lot)
     "paired": [0, 1, 8, 128, 2048, 9000],          # paired depth 1..8192

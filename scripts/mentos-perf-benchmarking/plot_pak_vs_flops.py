@@ -69,6 +69,9 @@ def _collect(dataset: str, partial_cap: int = 0, exclude: set[str] | None = None
         model, variant = run_dir.parts[-2], run_dir.parts[-1]
         if exclude and model in exclude:
             continue
+        if model == "mentos" and variant not in _MENTOS_LABEL:
+            continue        # show only the headline step-90000 mentos variants
+
         flops = []
         for fp in pred_dir.glob("*/flops.json"):
             try:
@@ -146,10 +149,11 @@ def _display_name(model: str) -> str:
 
 
 # MSA-Pairformer is a genuine single forward (no recycle loop) -> its one preset is r=0.
-# MENTOS recycles pair_stack.num_recycles passes: a5sgd6ul_latest = num_recycles 1 (r=1),
-# a5sgd6ul_r0 = overridden to 0 (r=0). Map each variant to its true recycle label.
+# MENTOS recycles pair_stack.num_recycles passes. We display only the headline step-90000
+# checkpoint (best by the val_seq_pair sweep): s90k = num_recycles 1 (r=1), s90k_r0 = 0 (r=0).
+# Other mentos variants (older checkpoints) are skipped in _collect.
 _R0_FULL_MODELS = {"msa_pairformer"}
-_MENTOS_LABEL = {"a5sgd6ul_latest": "r=1 full", "a5sgd6ul_r0": "r=0 full"}
+_MENTOS_LABEL = {"a5sgd6ul_s90k": "stage1_r1", "a5sgd6ul_s90k_r0": "stage1_r0"}
 
 
 def _disp_variant(model: str, variant: str) -> str:
@@ -161,9 +165,9 @@ def _disp_variant(model: str, variant: str) -> str:
 
 
 def _is_r0_rep(model: str, variant: str) -> bool:
-    """The r=0 representative of a model: its r0 sweep point (incl. MENTOS a5sgd6ul_r0),
+    """The r=0 representative of a model: its r0 sweep point (incl. MENTOS s90k_r0),
     or (for single-forward models) its only preset."""
-    return variant in ("r0", "a5sgd6ul_r0") or model in _R0_FULL_MODELS
+    return variant in ("r0", "a5sgd6ul_s90k_r0") or model in _R0_FULL_MODELS
 
 
 def _pareto(pts: list[dict]) -> list[dict]:
@@ -263,7 +267,8 @@ def main() -> None:
     fig.tight_layout()
     out = args.out or str(settings().runs_root / args.dataset / "pak_vs_flops.png")
     fig.savefig(out, dpi=160)
-    print(f"wrote {out}  ({len(pts)} runs, {len(models)} models)")
+    fig.savefig(str(Path(out).with_suffix(".pdf")))   # vector copy for the report
+    print(f"wrote {out} (+pdf)  ({len(pts)} runs, {len(models)} models)")
 
 
 if __name__ == "__main__":

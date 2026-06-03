@@ -27,10 +27,10 @@ def _as_list(x) -> list[str]:
     return [s for s in str(x).split(",") if s]
 
 
-def _matrix(dataset, model, preset, overrides):
+def _matrix(dataset, model, preset, overrides, checkpoint=None):
     for d in _as_list(dataset):
         for m in _as_list(model):
-            yield pipeline.make_run(d, m, preset=preset, overrides=overrides)
+            yield pipeline.make_run(d, m, preset=preset, overrides=overrides, checkpoint=checkpoint)
 
 
 class Ecstasy:
@@ -68,21 +68,24 @@ class Ecstasy:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
-            profile=False):
+            profile=False, checkpoint=None):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
+        --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
+        (for models without committed presets, e.g. mentos): the name resolves to concrete
+        weights/recycles via registry.local.yaml (run notion_pull.py first).
         --profile additionally measures inference FLOPs and writes a flops.json
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
         """
-        for r in _matrix(dataset, model, preset, set):
+        for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
             pipeline.run_predict(r, limit=limit, profile=profile)
             if not no_score:
                 pipeline.run_score(r, limit=limit)
 
-    def score(self, dataset, model, preset=None, set=None, limit=None):
+    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None):
         """Score existing predictions over the dataset×model matrix."""
-        for r in _matrix(dataset, model, preset, set):
+        for r in _matrix(dataset, model, preset, set, checkpoint):
             pipeline.run_score(r, limit=limit)
 
     def compare(self, dataset):

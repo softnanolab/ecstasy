@@ -57,25 +57,44 @@ def _variant(preset: str, overrides: dict | None) -> str:
     return f"{preset}+{hashlib.sha256(canonical.encode()).hexdigest()[:8]}"
 
 
-def load_model(name: str, preset: str | None = None, overrides: dict | None = None) -> ModelRun:
+def load_model(name: str, preset: str | None = None, overrides: dict | None = None,
+               checkpoint: str | None = None) -> ModelRun:
     reg = _registry()
     if name not in reg:
         raise KeyError(f"unknown model {name!r}; registered: {model_names()}")
     row = resolve(dict(reg[name]))
-    preset = preset or row["default_preset"]
     presets = row.get("presets", {})
+
+    def _make(preset_name: str, variant: str, params: dict) -> ModelRun:
+        return ModelRun(
+            name=name,
+            runner=_RUNNERS_DIR / row["runner"],
+            env=Path(row["env"]),
+            msa=row.get("msa", "none"),
+            preset=preset_name,
+            variant=variant,
+            params=params,
+            infra=dict(row.get("infra", {})),
+        )
+
+    # Checkpoint models (e.g. mentos) have no committed presets: resolve a checkpoint *name*
+    # to concrete params from the Notion-backed registry cache. The variant is the name.
+    if checkpoint:
+        from ecstasy.registry import local
+        params = local.checkpoint_params(checkpoint)
+        if overrides:
+            params.update(overrides)
+        return _make(checkpoint, _variant(checkpoint, overrides), params)
+    if not presets:
+        if preset:
+            raise KeyError(f"model {name!r} has no presets; select a checkpoint with "
+                           f"--checkpoint <name> (from the Notion registry)")
+        return _make("", "", {})            # metadata-only (msa/env/needs_msa), not runnable
+
+    preset = preset or row["default_preset"]
     if preset not in presets:
         raise KeyError(f"model {name!r} has no preset {preset!r}; have {sorted(presets)}")
     params = dict(presets[preset])
     if overrides:
         params.update(overrides)
-    return ModelRun(
-        name=name,
-        runner=_RUNNERS_DIR / row["runner"],
-        env=Path(row["env"]),
-        msa=row.get("msa", "none"),
-        preset=preset,
-        variant=_variant(preset, overrides),
-        params=params,
-        infra=dict(row.get("infra", {})),
-    )
+    return _make(preset, _variant(preset, overrides), params)
