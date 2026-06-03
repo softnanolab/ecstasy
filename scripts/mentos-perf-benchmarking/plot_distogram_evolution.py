@@ -75,6 +75,21 @@ def _paks(cprob: np.ndarray, gt_bins: np.ndarray, la: int, lb: int) -> tuple[flo
     return inter, (float(np.mean(intra_vals)) if intra_vals else float("nan"))
 
 
+def _overlay_rgb(gt_bins: np.ndarray, argmax: np.ndarray | None = None, blend: float = 0.70) -> np.ndarray:
+    """White-background RGB image: GT contacts in black, predicted (if given) in red.
+
+    white = neither, black = GT-only, light red = predicted-only (FP), dark red = both.
+    Pass ``argmax=None`` for a GT-only panel.
+    """
+    L = gt_bins.shape[0]
+    img = np.ones((L, L, 3))
+    img[(gt_bins >= 0) & (gt_bins < CONTACT_BIN)] = (0.0, 0.0, 0.0)
+    if argmax is not None:
+        pred = argmax < CONTACT_BIN
+        img[pred] = (1 - blend) * img[pred] + blend * np.array([1.0, 0.0, 0.0])
+    return img
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--npz-dir", required=True)
@@ -84,6 +99,9 @@ def main() -> None:
     ap.add_argument("--binary", action="store_true",
                     help="render predicted contacts as binary (argmax bin < CONTACT_BIN, i.e. < ~8 Å) "
                          "instead of the continuous argmax distance gradient")
+    ap.add_argument("--overlay", action="store_true",
+                    help="overlay GT (black) and predicted (bright red) contacts on a white background "
+                         "(white=none, black=GT-only, light red=FP, dark red=correct); overrides --binary")
     args = ap.parse_args()
 
     if not _plotstyle.use_cmu_concrete():
@@ -91,12 +109,14 @@ def main() -> None:
     npz_dir = Path(args.npz_dir)
     ids = [s.strip() for s in args.ids.split(",")]
     steps = [int(s) for s in args.steps.split(",")]
-    line_c = "tab:red" if args.binary else "0.4"  # boundary line colour readable on each cmap
-    if args.binary:
-        cmap = plt.get_cmap("gray_r").copy(); vmax = 1   # contact=black, none=white
-    else:
-        cmap = plt.get_cmap("magma_r").copy(); vmax = VMAX  # distance gradient, bright=close
-    cmap.set_bad("0.82")  # unresolved GT pixels (-1) → grey
+    overlay = args.overlay
+    line_c = "0.55" if overlay else ("tab:red" if args.binary else "0.4")  # boundary line readable per mode
+    if not overlay:
+        if args.binary:
+            cmap = plt.get_cmap("gray_r").copy(); vmax = 1   # contact=black, none=white
+        else:
+            cmap = plt.get_cmap("magma_r").copy(); vmax = VMAX  # distance gradient, bright=close
+        cmap.set_bad("0.82")  # unresolved GT pixels (-1) → grey
 
     def gt_disp(gt_bins):
         m = np.ma.masked_less(gt_bins, 0)
@@ -116,13 +136,19 @@ def main() -> None:
         am, cprob, gt_bins, la, lb = _load(npz_dir, pid, steps[-1])
         # GT column, far LEFT (3-line title pad keeps its panel height aligned with the
         # step columns, whose titles carry two P@K lines below the step label).
-        ax[r, 0].imshow(gt_disp(gt_bins), cmap=cmap, vmin=0, vmax=vmax, aspect="equal", interpolation="nearest")
+        if overlay:
+            ax[r, 0].imshow(_overlay_rgb(gt_bins), aspect="equal", interpolation="nearest")
+        else:
+            ax[r, 0].imshow(gt_disp(gt_bins), cmap=cmap, vmin=0, vmax=vmax, aspect="equal", interpolation="nearest")
         ax[r, 0].axhline(la - 0.5, c=line_c, lw=0.5); ax[r, 0].axvline(la - 0.5, c=line_c, lw=0.5)
         ax[r, 0].set_title("Ground Truth\n \n ", fontsize=11)
         ax[r, 0].set_ylabel(pid, fontsize=14)
         for j, step in enumerate(steps, start=1):
             am, cprob, gt_bins, la, lb = _load(npz_dir, pid, step)
-            im = ax[r, j].imshow(pred_disp(am), cmap=cmap, vmin=0, vmax=vmax, aspect="equal", interpolation="nearest")
+            if overlay:
+                ax[r, j].imshow(_overlay_rgb(gt_bins, am), aspect="equal", interpolation="nearest")
+            else:
+                im = ax[r, j].imshow(pred_disp(am), cmap=cmap, vmin=0, vmax=vmax, aspect="equal", interpolation="nearest")
             ax[r, j].axhline(la - 0.5, c=line_c, lw=0.5); ax[r, j].axvline(la - 0.5, c=line_c, lw=0.5)
             inter, intra = _paks(cprob, gt_bins, la, lb)
             lab = "0" if step == 0 else f"{step // 1000}K"
@@ -130,7 +156,15 @@ def main() -> None:
         for c in range(ncol):
             ax[r, c].set_xticks([]); ax[r, c].set_yticks([])
 
-    if args.binary:
+    if overlay:
+        from matplotlib.patches import Patch
+        fig.legend(handles=[Patch(facecolor="black", label="GT contact"),
+                            Patch(facecolor=(1.0, 0.30, 0.30), label="Predicted only (FP)"),
+                            Patch(facecolor=(0.30, 0.0, 0.0), label="Both (correct)")],
+                   loc="lower center", ncol=3, frameon=False, fontsize=10)
+        fig.suptitle("MENTOS distogram evolution — GT (black) vs predicted (bright red) contacts "
+                     "[white = none; dark red = correct; grey lines = chain boundary]", fontsize=13)
+    elif args.binary:
         fig.suptitle("MENTOS distogram evolution — predicted contacts (binary: argmax bin < ~8 Å; "
                      "black = contact; boundary lines = chain split)", fontsize=13)
     else:
