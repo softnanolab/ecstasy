@@ -63,7 +63,7 @@ esmfold:
 
 mentos:
   runner: mentos_runner.py
-  env: ${ENVS_ROOT}/.venv-boltz          # where the mentos package is installed editable
+  env: ${ENVS_ROOT}/.venv-mentos         # dedicated venv; mentos installed editable from /home/.../mentos
   msa: none
   # No checkpoint presets here. MENTOS checkpoints are concrete (paths, steps, recycles) and
   # live ONLY in the Notion benchmarking Registry (the source of truth). Select one by name:
@@ -74,7 +74,7 @@ mentos:
 
 msa_pairformer:
   runner: msa_pairformer_runner.py
-  env: ${ENVS_ROOT}/.venv-esmfold
+  env: ${ENVS_ROOT}/.venv-msa_pairformer   # dedicated venv; MSA_Pairformer installed editable from modules/msa_pairformer
   msa: complex
   default_preset: full
   presets:
