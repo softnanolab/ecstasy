@@ -24,3 +24,6 @@ test.ipynb
 # committed. Document the equivalent commands in scripts/README.md instead.
 scripts/*.sbatch
 !scripts/run_experiment.sbatch
+
+# Local cache of the Notion benchmarking Registry (notion_pull.py output)
+registry.local.yaml

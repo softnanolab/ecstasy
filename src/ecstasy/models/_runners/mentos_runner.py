@@ -150,6 +150,14 @@ def main():
     )
 
     cfg = _load_cfg(model_config_path, run_id)
+    # MENTOS recycles `num_recycles + 1` pair-stack passes (pair_stack.num_recycles;
+    # a5sgd6ul trains at 1). A preset may override it (e.g. 0 = single pass, no
+    # distogram recycle) to sweep the recycle knob like boltz2/esmfold.
+    from omegaconf import OmegaConf
+    if cfg_params.get("num_recycles") is not None:
+        OmegaConf.update(cfg, "model.pair_stack.num_recycles", int(cfg_params["num_recycles"]))
+    eff_recycles = int(OmegaConf.select(cfg, "model.pair_stack.num_recycles") or 0)
+    print(f"[mentos] num_recycles={eff_recycles}", flush=True)
     # Reuse the eval's loader verbatim: instantiates MENTOS(cfg), sets mlm mask_prob 0
     # and loss.mlm 0, loads state_dict(strict=False), .to(device), .eval().
     model = load_model(cfg, Path(model_weights_path), str(device))
@@ -182,8 +190,8 @@ def main():
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             import _flops
 
-            # MENTOS is a single forward; the WHOLE forward is the contact-dependency
-            # subgraph (no structure module to exclude). Count everything.
+            # The WHOLE forward (incl. its num_recycles pair-stack passes) is the
+            # contact-dependency subgraph — no structure module to exclude. Count all.
             out, flops_payload = _flops.profile_call(model, batch, mask_inputs=False)
         else:
             out = model(batch, mask_inputs=False)
@@ -212,7 +220,7 @@ def main():
             flops_payload,
             L=int(contact.shape[0]),
             msa_depth=0,
-            recycles=None,
+            recycles=eff_recycles,
             model="mentos",
         )
         print(f"[mentos] WROTE {sidecar}  flops={flops_payload['flops']:.3e}", flush=True)

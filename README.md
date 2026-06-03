@@ -28,6 +28,34 @@ bash scripts/install/boltz.sh
 bash scripts/install/colabfold.sh
 ```
 
+## Configuration & the benchmarking registry
+
+Ecstasy commits **no machine-specific paths**. Everything concrete lives in one of two places:
+
+1. **Filesystem roots** — a gitignored repo-root `.env` (copy `.env.example`). `ecstasy.config`
+   resolves them `env > .env`, and the registries (`registry/datasets.yaml`,
+   `registry/models.yaml`) reference them with `${VAR}` placeholders.
+
+2. **The Notion benchmarking registry** — the source of truth for everything concrete. It is the
+   **Ecstasy** page (set `ECSTASY_NOTION_PAGE` in `.env`), laid out as a project hub:
+
+   - **Registry** — two small reference tables that scripts resolve by name:
+
+     | Table | Holds |
+     |-------|-------|
+     | **Checkpoints** | `key` (run name) → absolute path, model, run_id, step, num_recycles, status |
+     | **Datasets** | name → index path, gt_root, n, split, contact_bin |
+
+   - **Benchmarking Log** — a database of dated, narrative campaign entries (the project's
+     evolution, MENTOS-Sprints style): goal → TL;DR → what we ran → results with figures embedded
+     inline → decision → artifacts. Raw results and charts live here, in context.
+
+   Benchmark scripts (under `scripts/mentos-perf-benchmarking/`) take checkpoint and dataset
+   **names**, never paths — they resolve names → paths from the Registry tables. Nothing in git
+   pins where a checkpoint or split physically lives; that lives in Notion (a local copy is kept
+   under `$DATA_ROOT`, as today). Each new benchmarking campaign gets its own `scripts/<project>/`
+   and its own Benchmarking Log entries.
+
 ## [DEV] Management of Repository
 ### Maintaning dependencies
 To add a package to primary dependencies in UV pyproject.toml, run:

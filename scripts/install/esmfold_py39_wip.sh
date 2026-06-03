@@ -30,7 +30,7 @@ conda install -y cudatoolkit-dev 'gxx>=6.0.0,<12.0' cudnn r-base r-devtools -c d
 
 # Step 4: Update environment with YAML
 echo -e "${BLUE}Updating environment with esmfold_py39.yaml...${NC}"
-conda env update -p "$ENV_PATH" --file /home/jovyan/workspace/ecstasy/scripts/install/esmfold_py39.yaml
+conda env update -p "$ENV_PATH" --file "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/esmfold_py39_wip.yaml"
 
 # Step 5: Install fair-esm[esmfold]
 echo -e "${BLUE}Installing fair-esm[esmfold]...${NC}"

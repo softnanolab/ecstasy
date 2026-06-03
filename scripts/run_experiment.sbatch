@@ -14,7 +14,7 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "${REPO_ROOT}/logs"
-VENV="${ECSTASY_VENV:-/home/u6jv/harsh.u6jv/ecstasy/envs/.venv-boltz}"
+VENV="${ECSTASY_VENV:-${ENVS_ROOT:?set ECSTASY_VENV or ENVS_ROOT}/.venv-boltz}"
 # shellcheck disable=SC1091
 source "${VENV}/bin/activate"
 cd "${REPO_ROOT}"

@@ -62,9 +62,9 @@ class Run:
 
 
 def make_run(dataset: str, model: str, preset: str | None = None,
-             overrides: dict | None = None) -> Run:
+             overrides: dict | None = None, checkpoint: str | None = None) -> Run:
     return Run(dataset=load_dataset(dataset),
-               model=load_model(model, preset=preset, overrides=overrides))
+               model=load_model(model, preset=preset, overrides=overrides, checkpoint=checkpoint))
 
 
 def run_predict(run: Run, limit: int | None = None, profile: bool = False) -> None:
