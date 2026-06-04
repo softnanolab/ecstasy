@@ -58,12 +58,14 @@ def _bootstrap_ci(values: np.ndarray) -> tuple[float, float]:
     return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
 
 
-def _collect(dataset: str, partial_cap: int = 0, exclude: set[str] | None = None) -> list[dict]:
+def _collect(dataset: str, partial_cap: int = 0, exclude: set[str] | None = None,
+             tolerance: int = 0) -> list[dict]:
     root = settings().runs_root / dataset
     # Iterate every model/variant dir that has FLOPs sidecars (not just finished runs).
     pts = []
     entries_by_id = None     # lazily built only if partial scoring is needed
     dataset_obj = None
+    gt_cache: dict = {}      # id -> gt_for(...) cache, reused across runs (tolerance mode)
     for pred_dir in sorted(root.glob("*/*/predictions")):
         run_dir = pred_dir.parent
         model, variant = run_dir.parts[-2], run_dir.parts[-1]
@@ -83,7 +85,13 @@ def _collect(dataset: str, partial_cap: int = 0, exclude: set[str] | None = None
 
         result = run_dir / "result.json"
         partial = False
-        if result.exists():
+        if tolerance > 0:
+            # Rescore saved predictions with spatial tolerance (no inference, no result.json).
+            if dataset_obj is None:
+                from ecstasy.datasets import load_dataset
+                dataset_obj = load_dataset(dataset)
+            paks = _tolerant_paks(dataset_obj, gt_cache, pred_dir, tolerance)
+        elif result.exists():
             per = json.loads(result.read_text()).get("per_protein", {})
             paks = np.array([v["P@K"] for v in per.values()
                              if isinstance(v.get("P@K"), (int, float)) and v["P@K"] == v["P@K"]])
@@ -133,6 +141,61 @@ def _score_partial(dataset_obj, entries_by_id, pred_dir, cap: int) -> np.ndarray
     return np.array(paks)
 
 
+from scipy.ndimage import binary_dilation as _binary_dilation  # noqa: E402
+
+_TOL_ST = np.ones((3, 3), bool)  # Chebyshev neighbourhood for spatial tolerance
+
+
+def _tol_inter_pak(cp_full: np.ndarray, gt: dict, tol: int) -> float | None:
+    """Tolerant inter-chain P@K from a saved (L,L) contact-prob map.
+
+    A top-K predicted inter pair counts as correct if a true inter contact lies
+    within Chebyshev-``tol`` in (chainA-res, chainB-res) space (GT dilated by ``tol``).
+    ``tol=0`` reproduces the exact inter P@K. Returns None when undefined
+    (non-dimer / shape mismatch / no true inter contacts).
+    """
+    seqs = gt["sequences"]
+    if len(seqs) != 2:
+        return None
+    la, lb = len(seqs[0]), len(seqs[1])
+    if cp_full.shape[0] != la + lb:
+        return None
+    cp = cp_full[:la, la:]
+    gti = gt["contact_map"][:la, la:]
+    vi = gt["valid"][:la, la:]
+    K = int((gti & vi).sum())
+    if K == 0:
+        return None
+    dil = (_binary_dilation(gti, _TOL_ST, iterations=tol) if tol > 0 else gti) & vi
+    order = np.argsort(-np.where(vi, cp, -1.0).ravel())[:K]
+    return float(dil.ravel()[order].sum()) / K
+
+
+def _tolerant_paks(dataset_obj, gt_cache: dict, pred_dir: Path, tol: int) -> np.ndarray:
+    """Per-protein tolerant inter P@K for one run, scored from saved contact.npz
+    (no inference). GT is cached across runs since it's shared."""
+    paks = []
+    for entry_dir in sorted(pred_dir.glob("*")):
+        cpath = entry_dir / "contact.npz"
+        if not cpath.exists():
+            continue
+        gt = gt_cache.get(entry_dir.name)
+        if gt is None:
+            try:
+                gt = dataset_obj.gt_for(entry_dir.name)
+            except Exception:        # noqa: BLE001
+                continue
+            gt_cache[entry_dir.name] = gt
+        try:
+            cp_full = np.load(cpath)["probs"].astype(np.float64)
+        except Exception:        # noqa: BLE001
+            continue
+        v = _tol_inter_pak(cp_full, gt, tol)
+        if v is not None:
+            paks.append(v)
+    return np.array(paks)
+
+
 # Human-readable model names for the legend (MSA dependency spelled out).
 _DISPLAY_NAME = {
     "boltz2": "Boltz2 (with MSAs)",
@@ -153,7 +216,12 @@ def _display_name(model: str) -> str:
 # checkpoint (best by the val_seq_pair sweep): s90k = num_recycles 1 (r=1), s90k_r0 = 0 (r=0).
 # Other mentos variants (older checkpoints) are skipped in _collect.
 _R0_FULL_MODELS = {"msa_pairformer"}
-_MENTOS_LABEL = {"a5sgd6ul_s90k": "stage1_r1", "a5sgd6ul_s90k_r0": "stage1_r0"}
+_MENTOS_LABEL = {
+    "a5sgd6ul_s90k_r0": "stage1_r0",
+    "a5sgd6ul_s90k": "stage1_r1",
+    "a5sgd6ul_s90k_r3": "stage1_r3",
+    "a5sgd6ul_s90k_r5": "stage1_r5",
+}
 
 
 def _disp_variant(model: str, variant: str) -> str:
@@ -192,10 +260,14 @@ def main() -> None:
                     help="comma-separated model names to omit (e.g. an in-flight series)")
     ap.add_argument("--annotate-r0", action="store_true",
                     help="label each model's r=0 point with its mean P@K and mean T-FLOPs")
+    ap.add_argument("--tolerance", type=int, default=0,
+                    help="spatial tolerance (residues) for inter P@K: a top-K prediction counts if a "
+                         "true inter contact is within this Chebyshev distance. 0 = exact (reads result.json); "
+                         ">0 rescores saved predictions (e.g. 2 = ±2 nearby pairs)")
     args = ap.parse_args()
 
     exclude = {m.strip() for m in args.exclude_models.split(",") if m.strip()}
-    pts = _collect(args.dataset, partial_cap=args.partial_cap, exclude=exclude)
+    pts = _collect(args.dataset, partial_cap=args.partial_cap, exclude=exclude, tolerance=args.tolerance)
     if not pts:
         raise SystemExit(f"no runs with flops.json under "
                          f"{settings().runs_root / args.dataset} — run `ecstasy run --profile` first")
@@ -241,10 +313,12 @@ def main() -> None:
         ax.step([p["flops"] for p in pf], [p["pak"] for p in pf], where="post",
                 color="0.4", ls="--", lw=1.0, zorder=2)
 
+    tol_tag = f"  (±{args.tolerance}-residue tolerance)" if args.tolerance > 0 else ""
     ax.set_xscale("log")
     ax.set_xlabel("inference FLOPs (true = 2×MACs, contact-dependency subgraph, log scale)")
-    ax.set_ylabel(f"mean inter-chain P@K  ({args.dataset})")
-    title = "Contact-prediction quality vs. inference compute"
+    ax.set_ylabel(f"mean inter-chain P@K{tol_tag}  ({args.dataset})")
+    title = "Contact-prediction quality vs. inference compute" + (
+        f"\ninter P@K with ±{args.tolerance}-residue spatial tolerance" if args.tolerance > 0 else "")
     if n_partial:
         title += f"\n(PREVIEW — {n_partial} run(s) partially scored, in-flight sweep)"
     ax.set_title(title)
@@ -265,7 +339,8 @@ def main() -> None:
     ax.legend(handles=handles, fontsize=7.5, loc="best")
 
     fig.tight_layout()
-    out = args.out or str(settings().runs_root / args.dataset / "pak_vs_flops.png")
+    _fname = "pak_vs_flops.png" if args.tolerance == 0 else f"pak_vs_flops_tol{args.tolerance}.png"
+    out = args.out or str(settings().runs_root / args.dataset / _fname)
     fig.savefig(out, dpi=160)
     fig.savefig(str(Path(out).with_suffix(".pdf")))   # vector copy for the report
     print(f"wrote {out} (+pdf)  ({len(pts)} runs, {len(models)} models)")
