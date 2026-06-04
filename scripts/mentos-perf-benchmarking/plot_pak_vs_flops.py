@@ -216,7 +216,12 @@ def _display_name(model: str) -> str:
 # checkpoint (best by the val_seq_pair sweep): s90k = num_recycles 1 (r=1), s90k_r0 = 0 (r=0).
 # Other mentos variants (older checkpoints) are skipped in _collect.
 _R0_FULL_MODELS = {"msa_pairformer"}
-_MENTOS_LABEL = {"a5sgd6ul_s90k": "stage1_r1", "a5sgd6ul_s90k_r0": "stage1_r0"}
+_MENTOS_LABEL = {
+    "a5sgd6ul_s90k_r0": "stage1_r0",
+    "a5sgd6ul_s90k": "stage1_r1",
+    "a5sgd6ul_s90k_r3": "stage1_r3",
+    "a5sgd6ul_s90k_r5": "stage1_r5",
+}
 
 
 def _disp_variant(model: str, variant: str) -> str:
