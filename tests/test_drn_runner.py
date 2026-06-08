@@ -10,7 +10,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ecstasy.models._runners.drn_1d2d_inter_runner import _embed_block
+from ecstasy.models._runners.drn_1d2d_inter_runner import (
+    _chain_a3m_from_rows,
+    _embed_block,
+    _paired_a3m_from_csvs,
+    _read_boltz_csv,
+)
 
 
 def test_embed_block_shape_and_dtype():
@@ -43,3 +48,36 @@ def test_embed_block_is_symmetric():
 def test_embed_block_rejects_wrong_shape():
     with pytest.raises(RuntimeError, match=r"DRN block .* != expected"):
         _embed_block(np.zeros((3, 4), dtype=np.float32), 4, 4)
+
+
+# --- Boltz CSV -> DRN MSA conversion (the `msa: boltz_csv` reuse) -----------
+
+def test_read_boltz_csv_parses_keys_and_seqs(tmp_path):
+    csv = tmp_path / "0.csv"
+    csv.write_text("key,sequence\n0,QUERYSEQ\n3,PAIREDSEQ\n-1,UNPAIRED\n")
+    rows = _read_boltz_csv(csv)
+    assert rows == [(0, "QUERYSEQ"), (3, "PAIREDSEQ"), (-1, "UNPAIRED")]
+
+
+def test_chain_a3m_puts_query_first_with_all_rows():
+    rows = [(0, "QUERY"), (2, "HOMOLOG"), (-1, "UNPAIR")]
+    a3m = _chain_a3m_from_rows(rows, "A")
+    lines = a3m.splitlines()
+    assert lines[0] == ">A" and lines[1] == "QUERY"        # query first, clean header
+    assert lines[2:] == [">A_1_k2", "HOMOLOG", ">A_2_k-1", "UNPAIR"]
+
+
+def test_paired_a3m_joins_on_shared_key_and_drops_unpaired():
+    # Shared keys >= 0 are 0 and 3; key 5 (B-only) and -1 (unpaired) are excluded.
+    rowsA = [(0, "QA"), (3, "XA"), (-1, "UA")]
+    rowsB = [(0, "QB"), (3, "XB"), (5, "YB"), (-1, "UB")]
+    paired = _paired_a3m_from_csvs(rowsA, rowsB, "paired")
+    assert paired.splitlines() == [">paired", "QAQB", ">pair_k3", "XAXB"]
+
+
+def test_paired_a3m_query_only_when_no_common_species():
+    # Only the query (key 0) is shared -> a valid 1-row paired MSA, no coevolution.
+    rowsA = [(0, "QA"), (1, "XA")]
+    rowsB = [(0, "QB"), (2, "YB")]
+    paired = _paired_a3m_from_csvs(rowsA, rowsB, "paired")
+    assert paired.splitlines() == [">paired", "QAQB"]

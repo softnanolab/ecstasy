@@ -1,18 +1,22 @@
 """Self-contained DRN-1D2D_Inter runner — invoked via its env's python by the adapter.
 
 DRN-1D2D_Inter (Si & Yan, Brief. Bioinform. 2023) is SEQUENCE-ONLY inter-protein
-contact prediction for a 2-chain complex. It needs a per-chain MSA (UniRef90/100)
-for each chain and NO monomer structure, so the registry sets ``msa: per_chain``.
+contact prediction for a 2-chain complex. It needs a per-chain MSA per chain and a
+PAIRED complex MSA, no monomer structure, so the registry sets ``msa: boltz_csv``.
 
 This runner reproduces modules/drn_1d2d_inter/predict.py step-for-step, but:
-  * inputs come from the ecstasy stdin bundle (sequences + per-chain a3m), not argv;
+  * inputs come from the ecstasy stdin bundle (sequences + per-chain MSA), not argv;
   * every external-tool / weight path comes from ``params`` (registry preset), so
     nothing is hardcoded the way upstream predict.py is;
+  * MSAs come from the Boltz per-chain CSVs (``msa: boltz_csv``); we reuse Boltz's
+    taxonomy pairing (the CSV ``key`` column) to build the paired complex a3m,
+    REPLACING DRN's ``pair_msa`` (its header-parsed pairing yields zero pairs on
+    ColabFold-style a3ms — see _paired_a3m_from_csvs);
   * DRN emits only the inter-chain block (shape lenA x lenB); we embed it into the
     full square (L, L) probability map that ecstasy's scorer consumes.
 
 Reads a JSON bundle from stdin:
-  { entry_id, sequences[2], chain_ids[2], msa_paths{chain_id: a3m}, out_dir, params, infra }
+  { entry_id, sequences[2], chain_ids[2], msa_paths{chain_id: boltz_csv}, out_dir, params, infra }
 
 params (resolved ${...} paths from the registry preset):
   drn_root          repo dir of the DRN submodule (default: computed from __file__)
@@ -75,6 +79,57 @@ def _embed_block(block: np.ndarray, lenA: int, lenB: int) -> np.ndarray:
     return probs.astype(np.float16)
 
 
+def _read_boltz_csv(path: str | Path) -> list[tuple[int, str]]:
+    """Parse a Boltz per-chain MSA CSV into ``(key, sequence)`` rows.
+
+    Boltz CSV schema (see ``msa/boltz_csv.py``): a ``key,sequence`` header then one
+    row per sequence. ``key`` is the row index of the taxonomy-paired alignment row
+    (so the *same* key in chain A's and chain B's CSV = a boltz-paired pair); ``-1``
+    marks an unpaired row. Row 0 (key 0) is the query.
+    """
+    rows: list[tuple[int, str]] = []
+    for line in Path(path).read_text().splitlines()[1:]:  # skip header
+        line = line.strip()
+        if not line:
+            continue
+        key, _, seq = line.partition(",")
+        rows.append((int(key), seq))
+    return rows
+
+
+def _chain_a3m_from_rows(rows: list[tuple[int, str]], query_name: str) -> str:
+    """Render a chain's boltz CSV rows as a per-chain a3m (query first).
+
+    Used for DRN's per-chain features (PSSM, ESM-MSA-1b repr), which need depth but
+    NOT pairing — so synthetic headers are fine.
+    """
+    out: list[str] = []
+    for i, (key, seq) in enumerate(rows):
+        out.append(f">{query_name}" if i == 0 else f">{query_name}_{i}_k{key}")
+        out.append(seq)
+    return "\n".join(out) + "\n"
+
+
+def _paired_a3m_from_csvs(rowsA: list[tuple[int, str]], rowsB: list[tuple[int, str]],
+                          query_name: str) -> str:
+    """Build DRN's ``paired.a3m`` by joining the two chains' boltz CSV rows on their
+    shared pairing key (key >= 0), concatenating ``seqA + seqB`` per matched pair.
+
+    This REPLACES DRN's ``pair_msa.main`` (Si & Yan's taxonomy-header pairing): boltz
+    CSVs carry no taxonomy headers, but their ``key`` column already encodes boltz's
+    taxonomy pairing, so reusing it gives a faithful paired complex MSA without the
+    zero-pairing failure ColabFold-style a3ms hit. Row 0 (key 0) is the query complex.
+    """
+    byB = {k: s for k, s in rowsB if k >= 0}
+    out: list[str] = []
+    for k, sA in rowsA:
+        if k < 0 or k not in byB:
+            continue
+        out.append(f">{query_name}" if k == 0 else f">pair_k{k}")
+        out.append(sA + byB[k])
+    return "\n".join(out) + "\n"
+
+
 def main() -> None:
     import torch  # lazy: only present in the DRN env (keeps helpers import-clean elsewhere)
 
@@ -90,7 +145,7 @@ def main() -> None:
     if len(sequences) != 2:
         raise ValueError(f"DRN-1D2D_Inter handles exactly 2 chains, got {len(sequences)} for {entry_id}")
     if not msa_paths.get(chain_ids[0]) or not msa_paths.get(chain_ids[1]):
-        raise ValueError(f"DRN needs a per-chain a3m for both chains; have {sorted(msa_paths)}")
+        raise ValueError(f"DRN needs a Boltz MSA CSV for both chains; have {sorted(msa_paths)}")
 
     # Make DRN's library modules importable (paired.*, plm.*, load_feature, model).
     drn_root = Path(cfg.get("drn_root") or os.environ.get("DRN_ROOT")
@@ -113,7 +168,6 @@ def main() -> None:
     loadhhm = str(drn_root / "plm" / "LoadHHM.py")
 
     import load_feature
-    import paired.pair_msa as pair_msa
     import plm.esm1b_attn as esm1b_attn
     import plm.esm1b_repr as esm1b_repr
     import plm.msa1b_attn as msa1b_attn
@@ -128,13 +182,23 @@ def main() -> None:
     fasA, fasB = rp / "A.fasta", rp / "B.fasta"
     _write_fasta(fasA, "A", seqA)
     _write_fasta(fasB, "B", seqB)
-    a3mA, a3mB = msa_paths[chain_ids[0]], msa_paths[chain_ids[1]]
 
-    # --- feature pipeline (mirrors predict.py) -----------------------------
-    # 1. paired MSA
+    # --- MSAs from the Boltz per-chain CSVs (msa: boltz_csv) ----------------
+    # We reuse Boltz's taxonomy pairing (CSV `key` column) instead of DRN's
+    # header-based pair_msa, which gives zero pairing on ColabFold-style a3ms whose
+    # headers lack the species ids it parses. Build the two per-chain a3ms (depth-
+    # only features) + the paired complex a3m (key-joined) that pair_msa used to emit.
+    rowsA = _read_boltz_csv(msa_paths[chain_ids[0]])
+    rowsB = _read_boltz_csv(msa_paths[chain_ids[1]])
+    a3mA, a3mB = rp / "A.a3m", rp / "B.a3m"
+    a3mA.write_text(_chain_a3m_from_rows(rowsA, "A"))
+    a3mB.write_text(_chain_a3m_from_rows(rowsB, "B"))
+    a3mA, a3mB = str(a3mA), str(a3mB)
+
+    # --- feature pipeline (mirrors predict.py from here on) ----------------
+    # 1. paired MSA (key-joined complex a3m; replaces pair_msa.main output)
     paired_a3m = rp / "paired.a3m"
-    pair_msa.main({"fastaA": str(fasA), "fastaB": str(fasB),
-                   "msaA": a3mA, "msaB": a3mB, "outpath": str(rp)}, 0.5, 100000)
+    paired_a3m.write_text(_paired_a3m_from_csvs(rowsA, rowsB, "paired"))
 
     # 2. reformat / filter
     filter_paired_a3m = rp / "filtered_paired.a3m"
