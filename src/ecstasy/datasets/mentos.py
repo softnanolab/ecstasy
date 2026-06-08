@@ -33,31 +33,6 @@ class MentosSquareDataset(Dataset):
         self.swap_chains = bool(swap_chains)
 
     @staticmethod
-    def _alias_mentos_pickle_module() -> None:
-        """Alias ``mentos`` -> ``mint`` in ``sys.modules`` so the GT ``.pt`` files
-        (which pickle a ``mentos.dataclasses.Sample`` from before the package rename)
-        unpickle to mint's identical Sample dataclass.
-
-        The two envs straddle both names by design (see mentos_package_and_venvs
-        memory): the *scoring* env ships ``mint`` (aliased here), the *runner* env
-        ships ``mentos`` — do not "unify" them. ``gt_for`` is called unconditionally
-        from ``score()``, so an absent ``mint`` is a misconfigured scoring env, not a
-        no-op: raise a clear error rather than letting ``torch.load`` die later with
-        an opaque ``ModuleNotFoundError: mentos``.
-        """
-        import sys
-
-        try:
-            import mint.dataclasses
-        except ImportError as e:
-            raise ImportError(
-                "Loading MENTOS ground-truth .pt requires the `mint` package; "
-                "GT scoring must run in .venv-mentos (scripts/install/mentos.sh)."
-            ) from e
-        sys.modules.setdefault("mentos", sys.modules["mint"])
-        sys.modules.setdefault("mentos.dataclasses", mint.dataclasses)
-
-    @staticmethod
     def _swap_perm(la: int, L: int) -> np.ndarray:
         # new concat order = chainB (orig [la:L)) then chainA (orig [0:la))
         return np.r_[np.arange(la, L), np.arange(0, la)]
@@ -77,10 +52,11 @@ class MentosSquareDataset(Dataset):
     def gt_for(self, entry_id: str) -> dict:
         import torch
 
-        # Resolve the renamed-package pickle alias before torch.load (lazy: only a
-        # scoring env reaches here; the torch-less orchestrator never pays for it).
-        self._alias_mentos_pickle_module()
-
+        # GT .pt files pickle a `mentos.dataclasses.Sample`. The scoring env ships the
+        # `mentos` package (.venv-boltz / .venv-mentos both have it editable from
+        # /home/.../mentos), so torch.load resolves the class natively — no rename
+        # shim. (Lazy torch import: only a scoring env reaches here, never the
+        # torch-less orchestrator. See the mentos_package_and_venvs memory.)
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
         # bin < contact_bin == contact; -1 (unresolved) must NOT count as contact.

@@ -133,6 +133,17 @@ def _paired_a3m_from_csvs(rowsA: list[tuple[int, str]], rowsB: list[tuple[int, s
 def main() -> None:
     import torch  # lazy: only present in the DRN env (keeps helpers import-clean elsewhere)
 
+    # PORT SHIM (torch>=2.6): fair-esm's load_model_and_alphabet_local and DRN's
+    # ensemble weights were pickled under torch<2 and call torch.load WITHOUT
+    # weights_only; torch>=2.6 defaults that to True and refuses the (trusted, local)
+    # ESM argparse checkpoints with an UnpicklingError. Restore the old default for
+    # this process. See scripts/install/drn_1d2d_inter.sh PORT NOTE.
+    _orig_torch_load = torch.load
+    def _torch_load(*a, **k):
+        k.setdefault("weights_only", False)
+        return _orig_torch_load(*a, **k)
+    torch.load = _torch_load
+
     bundle = json.loads(sys.stdin.read())
     entry_id: str = bundle["entry_id"]
     sequences: list[str] = bundle["sequences"]

@@ -2,18 +2,24 @@
 # Install DRN-1D2D_Inter (Si & Yan, Brief. Bioinform. 2023) as an ecstasy model.
 #
 # DRN-1D2D_Inter is SEQUENCE-ONLY inter-protein contact prediction: it needs a
-# per-chain MSA (UniRef90/100) for each of the two chains, NO monomer structure.
-# Inference fuses ESM-1b + ESM-MSA-1b embeddings/attention, a paired-MSA CCMpred
-# coupling map, alnstats statistics and an HHM PSSM through a 2D ResNet ensemble
-# (7 weights). See modules/drn_1d2d_inter/predict.py for the reference flow that
-# the ecstasy runner (_runners/drn_1d2d_inter_runner.py) reproduces.
+# per-chain MSA for each of the two chains (ecstasy feeds it the Boltz per-chain
+# CSVs, msa=boltz_csv), NO monomer structure. Inference fuses ESM-1b + ESM-MSA-1b
+# embeddings/attention, a paired-MSA CCMpred coupling map, alnstats statistics and
+# an HHM PSSM through a 2D ResNet ensemble (7 weights). See predict.py for the
+# reference flow that the ecstasy runner (_runners/drn_1d2d_inter_runner.py) mirrors.
+#
+# PORT NOTE (Isambard / aarch64): upstream DRN targets py3.8 + torch1.9+cu111 (x86).
+# That stack does not exist for aarch64 + Hopper, so this script builds a uv venv on
+# the project's current torch (py3.12 + torch2.x/cu126, matching .venv-boltz) and the
+# runner carries a torch.load(weights_only=False) shim so fair-esm's old checkpoints
+# still load under torch>=2.6. Override TORCH_INDEX_URL / TORCH_PKG for another host.
 #
 # This script is idempotent: each stage is skipped if its artifact already exists.
-# Heavy/long stages (ESM weights ~7.5 GB, trained models ~MBs via gdown, CCMpred
+# Heavy/long stages (ESM weights ~7.5 GB, trained models ~181 MB via gdown, CCMpred
 # build) are clearly delimited so they can be run/inspected individually.
 #
 # Layout produced (all under scratch via the envs/tools symlinks):
-#   envs/drn_1d2d_inter/                     conda env (py3.8 + torch1.9 + fair-esm)
+#   envs/drn_1d2d_inter/                     uv venv (py3.12 + torch2.x + fair-esm)
 #   tools/{ccmpred,metapsicov,hhsuite}/      external binaries
 #   weights/drn_1d2d_inter/esm/              ESM-1b + ESM-MSA-1b + regression .pt
 #   modules/drn_1d2d_inter/model/1..7        trained DRN ResNet weights (gdown)
@@ -33,30 +39,29 @@ TOOLS="${TOOLS_ROOT:-$HERE/tools}"
 WEIGHTS="${ECSTASY_ROOT:-$HERE}/weights/drn_1d2d_inter"
 DRN="$HERE/modules/drn_1d2d_inter"
 NCPUS="${NCPUS:-$(nproc 2>/dev/null || echo 4)}"
+UV="${UV:-$(command -v uv || echo "$HOME/.local/bin/uv")}"
 
-# torch1.9 + matching CUDA is a host decision. cu111 wheels are the documented
-# DRN target; override TORCH_INDEX_URL for CPU-only or a different CUDA.
-TORCH_PKG="${TORCH_PKG:-torch==1.9.1+cu111 torchvision==0.10.1+cu111}"
-TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/torch_stable.html}"
+# torch + matching CUDA is a host decision. cu126 aarch64 wheels match this project's
+# other envs (.venv-boltz); override for a different CUDA / CPU-only / x86 host.
+PYVER="${DRN_PYVER:-3.12}"
+TORCH_PKG="${TORCH_PKG:-torch}"
+TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
 
-[ -d "$DRN/predict.py" ] || [ -f "$DRN/predict.py" ] || {
+[ -f "$DRN/predict.py" ] || {
   warn "submodule modules/drn_1d2d_inter is empty — run: git submodule update --init modules/drn_1d2d_inter"; exit 1; }
 
 # ---------------------------------------------------------------------------
-say "1/6  python env  ($ENV_PATH)"
+say "1/6  python env  ($ENV_PATH)  [uv, py$PYVER]"
 # ---------------------------------------------------------------------------
-# Use conda if present, else micromamba (this cluster ships micromamba only).
-if command -v conda >/dev/null 2>&1; then
-  PM=conda; source "$(conda info --base)/etc/profile.d/conda.sh"
-else
-  PM=micromamba; eval "$("$(command -v micromamba)" shell hook -s posix)"
+# uv venv + the project's current torch (NOT upstream's py3.8/torch1.9 — see PORT NOTE).
+# fair-esm is pure-python (works on torch2.x); numpy<2 avoids the removed np.float aliases
+# fair-esm 2.0.0 still references.
+if [ ! -x "$ENV_PATH/bin/python" ]; then
+  "$UV" venv --python "$PYVER" "$ENV_PATH"
 fi
-say "    package manager: $PM"
-if [ ! -d "$ENV_PATH" ]; then
-  "$PM" create -p "$ENV_PATH" -c conda-forge python=3.8 -y
-fi
-"$PM" run -p "$ENV_PATH" pip install --no-cache-dir -f "$TORCH_INDEX_URL" $TORCH_PKG
-"$PM" run -p "$ENV_PATH" pip install --no-cache-dir "fair-esm==2.0.0" biopython numpy
+export VIRTUAL_ENV="$ENV_PATH"
+"$UV" pip install --python "$ENV_PATH/bin/python" $TORCH_PKG --index-url "$TORCH_INDEX_URL"
+"$UV" pip install --python "$ENV_PATH/bin/python" "fair-esm==2.0.0" biopython "numpy<2"
 
 # ---------------------------------------------------------------------------
 say "2/6  hh-suite (hhmake + hhfilter)"
@@ -75,11 +80,19 @@ say "3/6  CCMpred (paired-MSA coevolution coupling map)"
 if [ ! -x "$TOOLS/ccmpred/bin/ccmpred" ]; then
   B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
   git clone --depth 1 --recursive https://github.com/soedinglab/CCMpred.git "$B/CCMpred"
+  # glibc>=2.26 declares ISO narrowing math fns (fsqrt/fadd/fmul/...) in <math.h>;
+  # CCMpred's `#define fsqrt sqrtf` then rewrites glibc's own `fsqrt` decl into a
+  # conflicting `sqrtf(double)`. Pull <math.h> in BEFORE the macro so those names are
+  # already bound (else: "conflicting types for 'sqrtf'" on any modern-glibc host).
+  CG_H="$B/CCMpred/lib/libconjugrad/include/conjugrad.h"
+  grep -q '<math.h>' "$CG_H" || perl -0pi -e 's/(#define __LIBCONJ_H__\n)/$1\n#include <math.h>\n/' "$CG_H"
   # CCMpred's CLI needs terminfo (setupterm). On a spack cluster, LIBRARY_PATH/
   # CMAKE_PREFIX_PATH inject an *incompatible* ncurses, so pin the SYSTEM ncurses
-  # (/usr/lib64, self-consistent) and strip the spack lib env for the build.
+  # (self-consistent) and strip the spack lib env for the build. Resolve whichever
+  # libncurses soname exists (.so.6 on glibc hosts, bare .so here).
+  NCURSES_LIB="$(ls /usr/lib64/libncurses.so.6 /usr/lib64/libncurses.so 2>/dev/null | head -1)"
   cmake_flags=(-DCMAKE_BUILD_TYPE=Release -DCURSES_NEED_NCURSES=TRUE
-    -DCURSES_LIBRARY=/usr/lib64/libncurses.so.6 -DCURSES_INCLUDE_PATH=/usr/include
+    -DCURSES_LIBRARY="$NCURSES_LIB" -DCURSES_INCLUDE_PATH=/usr/include
     -DCMAKE_EXE_LINKER_FLAGS=-ltinfo)
   [ "${CCMPRED_CUDA:-0}" = "1" ] || cmake_flags+=(-DWITH_CUDA=OFF)
   env -u LIBRARY_PATH -u CMAKE_PREFIX_PATH -u CPATH -u LD_LIBRARY_PATH \
@@ -125,19 +138,22 @@ cp -n "$DRN/data/regression/esm_msa1b_t12_100M_UR50S-contact-regression.pt" "$WE
 say "6/6  trained DRN models (7-member ResNet ensemble, Google Drive)"
 # ---------------------------------------------------------------------------
 # https://drive.google.com/file/d/1ICqJSNc01E2cGYhVj1IxzIkmnS-FMT2C/view -> model/{1..7}
-# NB: despite the .zip name the Drive blob is a RAR archive, so extract with 7z.
+# The Drive blob is a RAR v5 archive (despite the .zip name). No system extractor on
+# aarch64, so build unrar from rarlab source (tiny, no deps) and extract with it.
 if [ ! -f "$DRN/model/1" ]; then
-  "$ENV_PATH/bin/python" -m pip install --no-cache-dir gdown
-  "$ENV_PATH/bin/python" -m gdown 1ICqJSNc01E2cGYhVj1IxzIkmnS-FMT2C -O "$DRN/model.zip"
-  SZ="$(command -v 7z || true)"
-  if [ -z "$SZ" ]; then
-    "$PM" create -p "$TOOLS/p7zip-env" -c conda-forge p7zip -y
-    SZ="$TOOLS/p7zip-env/bin/7z"
+  B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
+  "$UV" tool run --from gdown gdown 1ICqJSNc01E2cGYhVj1IxzIkmnS-FMT2C -O "$B/model.rar"
+  UNRAR="$(command -v unrar || true)"
+  if [ -z "$UNRAR" ]; then
+    curl -fsSL "${UNRAR_SRC_URL:-https://www.rarlab.com/rar/unrarsrc-6.2.12.tar.gz}" -o "$B/unrarsrc.tar.gz"
+    ( cd "$B" && tar xzf unrarsrc.tar.gz && make -C unrar -j "$NCPUS" )
+    UNRAR="$B/unrar/unrar"
   fi
-  ( cd "$DRN" && "$SZ" x -y model.zip && rm -f model.zip )
+  "$UNRAR" x -y "$B/model.rar" "$DRN/"      # archive already nests model/{1..7}
+  trap - EXIT; rm -rf "$B"
 else
   say "    trained models present — skip"
 fi
 
-say "done. verify:  conda run -p $ENV_PATH python -c 'import torch,esm; print(torch.__version__)'"
+say "done. verify:  $ENV_PATH/bin/python -c 'import torch,esm; print(torch.__version__)'"
 say "registry env path -> envs/drn_1d2d_inter ; presets carry the tool/weight paths above."
