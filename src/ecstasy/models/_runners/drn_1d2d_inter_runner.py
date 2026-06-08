@@ -1,0 +1,178 @@
+"""Self-contained DRN-1D2D_Inter runner — invoked via its env's python by the adapter.
+
+DRN-1D2D_Inter (Si & Yan, Brief. Bioinform. 2023) is SEQUENCE-ONLY inter-protein
+contact prediction for a 2-chain complex. It needs a per-chain MSA (UniRef90/100)
+for each chain and NO monomer structure, so the registry sets ``msa: per_chain``.
+
+This runner reproduces modules/drn_1d2d_inter/predict.py step-for-step, but:
+  * inputs come from the ecstasy stdin bundle (sequences + per-chain a3m), not argv;
+  * every external-tool / weight path comes from ``params`` (registry preset), so
+    nothing is hardcoded the way upstream predict.py is;
+  * DRN emits only the inter-chain block (shape lenA x lenB); we embed it into the
+    full square (L, L) probability map that ecstasy's scorer consumes.
+
+Reads a JSON bundle from stdin:
+  { entry_id, sequences[2], chain_ids[2], msa_paths{chain_id: a3m}, out_dir, params, infra }
+
+params (resolved ${...} paths from the registry preset):
+  drn_root          repo dir of the DRN submodule (default: computed from __file__)
+  ccmpred_bin, fasta2aln_bin, alnstats_bin, hhmake_bin, hhfilter_bin
+  esm1b_weights, esm_msa1b_weights      ESM-1b / ESM-MSA-1b .pt (regression .pt alongside)
+  model_dir         dir holding the 7 trained ResNet weights named 1..7
+
+Writes:
+  <out_dir>/contact.npz   — probs (L, L) float16, length int32
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+
+
+def _write_fasta(path: Path, name: str, seq: str) -> None:
+    path.write_text(f">{name}\n{seq}\n")
+
+
+def main() -> None:
+    bundle = json.loads(sys.stdin.read())
+    entry_id: str = bundle["entry_id"]
+    sequences: list[str] = bundle["sequences"]
+    chain_ids: list[str] = bundle["chain_ids"]
+    msa_paths: dict[str, str] = bundle.get("msa_paths") or {}
+    out_dir = Path(bundle["out_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cfg = bundle.get("params") or {}
+
+    if len(sequences) != 2:
+        raise ValueError(f"DRN-1D2D_Inter handles exactly 2 chains, got {len(sequences)} for {entry_id}")
+    if not msa_paths.get(chain_ids[0]) or not msa_paths.get(chain_ids[1]):
+        raise ValueError(f"DRN needs a per-chain a3m for both chains; have {sorted(msa_paths)}")
+
+    # Make DRN's library modules importable (paired.*, plm.*, load_feature, model).
+    drn_root = Path(cfg.get("drn_root") or os.environ.get("DRN_ROOT")
+                    or (Path(__file__).resolve().parents[4] / "modules" / "drn_1d2d_inter"))
+    sys.path.insert(0, str(drn_root))
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    py = sys.executable
+
+    # Tool / weight paths (registry preset resolves the ${...} placeholders).
+    ccmpred = cfg["ccmpred_bin"]
+    fasta2aln = cfg["fasta2aln_bin"]
+    alnstats = cfg["alnstats_bin"]
+    hhmake = cfg["hhmake_bin"]
+    hhfilter = cfg["hhfilter_bin"]
+    esm1b_w = cfg["esm1b_weights"]
+    esm_msa1b_w = cfg["esm_msa1b_weights"]
+    # Trained weights + LoadHHM live inside the submodule (no scratch placeholder).
+    model_dir = Path(cfg.get("model_dir") or (drn_root / "model"))
+    loadhhm = str(drn_root / "plm" / "LoadHHM.py")
+
+    import load_feature
+    import paired.pair_msa as pair_msa
+    import plm.esm1b_attn as esm1b_attn
+    import plm.esm1b_repr as esm1b_repr
+    import plm.msa1b_attn as msa1b_attn
+    import plm.msa1b_repr as msa1b_repr
+    from model import resnet18
+
+    print(f"[drn] {entry_id}  device={device}  drn_root={drn_root}", flush=True)
+
+    rp = out_dir  # DRN writes all intermediate features into the result_path
+    seqA, seqB = sequences[0], sequences[1]
+    lenA, lenB = len(seqA), len(seqB)
+    fasA, fasB = rp / "A.fasta", rp / "B.fasta"
+    _write_fasta(fasA, "A", seqA)
+    _write_fasta(fasB, "B", seqB)
+    a3mA, a3mB = msa_paths[chain_ids[0]], msa_paths[chain_ids[1]]
+
+    # --- feature pipeline (mirrors predict.py) -----------------------------
+    # 1. paired MSA
+    paired_a3m = rp / "paired.a3m"
+    pair_msa.main({"fastaA": str(fasA), "fastaB": str(fasB),
+                   "msaA": a3mA, "msaB": a3mB, "outpath": str(rp)}, 0.5, 100000)
+
+    # 2. reformat / filter
+    filter_paired_a3m = rp / "filtered_paired.a3m"
+    paired_aln = rp / "paired.aln"
+    filter_a3mA = rp / "filteredA.a3m"
+    filter_a3mB = rp / "filteredB.a3m"
+    os.system(f"{hhfilter} -i {paired_a3m} -o {filter_paired_a3m} -diff 256")
+    os.system(f"{fasta2aln} {paired_a3m} {paired_aln}")
+    os.system(f"{hhfilter} -i {a3mA} -o {filter_a3mA} -diff 256")
+    os.system(f"{hhfilter} -i {a3mB} -o {filter_a3mB} -diff 256")
+
+    # 3. paired seq
+    paired_seq = rp / "paired.fasta"
+    _write_fasta(paired_seq, "paired", seqA + seqB)
+
+    # 4. CCMpred + alnstats
+    os.system(f"{ccmpred} -R {paired_aln} {rp/'paired.ccmpred'}")
+    os.system(f"{alnstats} {paired_aln} {rp/'paired.singout'} {rp/'paired.pairout'}")
+
+    # 5. ESM-1b attention
+    esm1b_attn.main(esm1b_w, str(paired_seq), str(fasA),
+                    str(rp / "esm1b_rt.attn"), str(rp / "esm1b_sw.attn"), device)
+    # 6. ESM-MSA-1b attention
+    msa1b_attn.main(esm_msa1b_w, str(filter_paired_a3m), str(fasA),
+                    str(rp / "msa1b_rt.attn"), str(rp / "msa1b_sw.attn"), device)
+
+    # 7. PSSM (hhm -> pkl)
+    os.system(f"{hhmake} -i {a3mA} -o {rp/'A.hhm'}")
+    subprocess.run([py, loadhhm, str(rp / "A.hhm")], check=True)
+    os.system(f"{hhmake} -i {a3mB} -o {rp/'B.hhm'}")
+    subprocess.run([py, loadhhm, str(rp / "B.hhm")], check=True)
+
+    # 8. ESM-1b representations
+    esm1b_repr.main(esm1b_w, str(fasA), str(rp / "A_esm1b.repr"), device)
+    esm1b_repr.main(esm1b_w, str(fasB), str(rp / "B_esm1b.repr"), device)
+    # 9. ESM-MSA-1b representations
+    msa1b_repr.main(esm_msa1b_w, str(filter_a3mA), str(rp / "A_msa1b.repr"), device)
+    msa1b_repr.main(esm_msa1b_w, str(filter_a3mB), str(rp / "B_msa1b.repr"), device)
+
+    # --- load features + run the 7-member ResNet ensemble ------------------
+    featureA, featureB = load_feature.chain_feature(str(rp))
+    rt_p2d, sw_p2d = load_feature.paired_feature(str(rp))
+    featureA = featureA.to(device).float()
+    featureB = featureB.to(device).float()
+    rt_p2d = rt_p2d.to(device).float()
+    sw_p2d = sw_p2d.to(device).float()
+    rt_input = load_feature.concat(featureA, featureB, rt_p2d)
+    sw_input = load_feature.concat(featureB, featureA, sw_p2d)
+
+    model = resnet18()
+    torch.set_grad_enabled(False)
+    _, _, lx, ly = rt_input.shape
+    acc = torch.zeros(lx, ly)
+    for i in range(1, 8):
+        model.load_state_dict(torch.load(str(model_dir / str(i)), map_location=device))
+        model.to(device).eval()
+        acc += model(rt_input).detach().cpu()
+        acc += model(sw_input).T.detach().cpu()
+    block = (acc / 14.0).numpy()  # (lenA, lenB) inter-chain contact probability
+
+    if block.shape != (lenA, lenB):
+        raise RuntimeError(f"DRN block {block.shape} != expected ({lenA}, {lenB})")
+
+    # Embed the inter-chain block into the full square (L, L) the scorer expects.
+    # Chain order in the bundle == token order in the GT, so chain A occupies the
+    # first lenA rows/cols. The scorer only reads inter-chain upper-tri pairs, so
+    # the intra blocks stay 0; we mirror the block for a symmetric map.
+    L = lenA + lenB
+    probs = np.zeros((L, L), dtype=np.float32)
+    probs[:lenA, lenA:] = block
+    probs[lenA:, :lenA] = block.T
+    probs = probs.astype(np.float16)
+
+    np.savez_compressed(out_dir / "contact.npz", probs=probs, length=np.int32(L))
+    print(f"[drn] WROTE {out_dir/'contact.npz'}  shape={probs.shape}  block={block.shape}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

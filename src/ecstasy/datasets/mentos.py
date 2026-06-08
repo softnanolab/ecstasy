@@ -50,7 +50,20 @@ class MentosSquareDataset(Dataset):
             yield Entry(id=str(row.id), sequences=seqs, chain_ids=chain_ids)
 
     def gt_for(self, entry_id: str) -> dict:
+        import sys
+
         import torch
+
+        # GT .pt files pickle a `mentos.dataclasses.Sample`, but the package was
+        # renamed `mentos` -> `mint`. Alias so unpickling resolves to mint's
+        # (identical) Sample dataclass. Lazy: only needed in a scoring env (mint
+        # installed), never in the torch-less orchestrator env.
+        try:
+            import mint.dataclasses
+            sys.modules.setdefault("mentos", sys.modules["mint"])
+            sys.modules.setdefault("mentos.dataclasses", mint.dataclasses)
+        except ImportError:
+            pass
 
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
