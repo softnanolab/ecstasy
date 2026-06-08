@@ -33,6 +33,31 @@ class MentosSquareDataset(Dataset):
         self.swap_chains = bool(swap_chains)
 
     @staticmethod
+    def _alias_mentos_pickle_module() -> None:
+        """Alias ``mentos`` -> ``mint`` in ``sys.modules`` so the GT ``.pt`` files
+        (which pickle a ``mentos.dataclasses.Sample`` from before the package rename)
+        unpickle to mint's identical Sample dataclass.
+
+        The two envs straddle both names by design (see mentos_package_and_venvs
+        memory): the *scoring* env ships ``mint`` (aliased here), the *runner* env
+        ships ``mentos`` — do not "unify" them. ``gt_for`` is called unconditionally
+        from ``score()``, so an absent ``mint`` is a misconfigured scoring env, not a
+        no-op: raise a clear error rather than letting ``torch.load`` die later with
+        an opaque ``ModuleNotFoundError: mentos``.
+        """
+        import sys
+
+        try:
+            import mint.dataclasses
+        except ImportError as e:
+            raise ImportError(
+                "Loading MENTOS ground-truth .pt requires the `mint` package; "
+                "GT scoring must run in .venv-mentos (scripts/install/mentos.sh)."
+            ) from e
+        sys.modules.setdefault("mentos", sys.modules["mint"])
+        sys.modules.setdefault("mentos.dataclasses", mint.dataclasses)
+
+    @staticmethod
     def _swap_perm(la: int, L: int) -> np.ndarray:
         # new concat order = chainB (orig [la:L)) then chainA (orig [0:la))
         return np.r_[np.arange(la, L), np.arange(0, la)]
@@ -50,28 +75,11 @@ class MentosSquareDataset(Dataset):
             yield Entry(id=str(row.id), sequences=seqs, chain_ids=chain_ids)
 
     def gt_for(self, entry_id: str) -> dict:
-        import sys
-
         import torch
 
-        # GT .pt files pickle a `mentos.dataclasses.Sample`, but the package was
-        # renamed `mentos` -> `mint`. Alias so unpickling resolves to mint's
-        # (identical) Sample dataclass. Lazy import: deferred to scoring time so the
-        # torch-less orchestrator env never pays for it. NOTE the two envs straddle
-        # both names by design (see mentos_package_and_venvs memory): the *scoring*
-        # env ships `mint` (aliased here), the *runner* env ships `mentos` — do not
-        # "unify" them. gt_for is called unconditionally from score(), so a missing
-        # mint is a misconfigured scoring env, not a no-op: surface it loudly rather
-        # than letting torch.load die with an opaque `ModuleNotFoundError: mentos`.
-        try:
-            import mint.dataclasses
-        except ImportError as e:
-            raise ImportError(
-                "Loading MENTOS ground-truth .pt requires the `mint` package; "
-                "GT scoring must run in .venv-mentos (scripts/install/mentos.sh)."
-            ) from e
-        sys.modules.setdefault("mentos", sys.modules["mint"])
-        sys.modules.setdefault("mentos.dataclasses", mint.dataclasses)
+        # Resolve the renamed-package pickle alias before torch.load (lazy: only a
+        # scoring env reaches here; the torch-less orchestrator never pays for it).
+        self._alias_mentos_pickle_module()
 
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")

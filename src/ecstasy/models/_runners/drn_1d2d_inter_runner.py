@@ -36,7 +36,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
+
+# NB: torch is imported lazily inside main() (it only runs in the DRN env), so the
+# pure helpers below — _embed_block in particular — stay importable for unit tests
+# in the torch-less orchestrator env.
 
 
 def _write_fasta(path: Path, name: str, seq: str) -> None:
@@ -54,7 +57,27 @@ def _run(*args) -> None:
     subprocess.run([str(a) for a in args], check=True)
 
 
+def _embed_block(block: np.ndarray, lenA: int, lenB: int) -> np.ndarray:
+    """Embed DRN's ``(lenA, lenB)`` inter-chain block into the full symmetric
+    ``(L, L)`` contact-probability map the scorer consumes.
+
+    Chain A occupies the first ``lenA`` rows/cols; chain B the rest. The scorer
+    (``metrics/contact.py: pak_inter_chain``) reads only the strict upper-triangle
+    inter-chain pairs, so the intra-chain blocks stay 0; the block is mirrored into
+    the lower triangle for a symmetric map. Returns float16, shape ``(L, L)``.
+    """
+    if block.shape != (lenA, lenB):
+        raise RuntimeError(f"DRN block {block.shape} != expected ({lenA}, {lenB})")
+    L = lenA + lenB
+    probs = np.zeros((L, L), dtype=np.float32)
+    probs[:lenA, lenA:] = block
+    probs[lenA:, :lenA] = block.T
+    return probs.astype(np.float16)
+
+
 def main() -> None:
+    import torch  # lazy: only present in the DRN env (keeps helpers import-clean elsewhere)
+
     bundle = json.loads(sys.stdin.read())
     entry_id: str = bundle["entry_id"]
     sequences: list[str] = bundle["sequences"]
@@ -172,18 +195,10 @@ def main() -> None:
         acc += model(sw_input).T.detach().cpu()
     block = (acc / 14.0).numpy()  # (lenA, lenB) inter-chain contact probability
 
-    if block.shape != (lenA, lenB):
-        raise RuntimeError(f"DRN block {block.shape} != expected ({lenA}, {lenB})")
-
-    # Embed the inter-chain block into the full square (L, L) the scorer expects.
     # Chain order in the bundle == token order in the GT, so chain A occupies the
-    # first lenA rows/cols. The scorer only reads inter-chain upper-tri pairs, so
-    # the intra blocks stay 0; we mirror the block for a symmetric map.
+    # first lenA rows/cols of the embedded square (see _embed_block).
+    probs = _embed_block(block, lenA, lenB)
     L = lenA + lenB
-    probs = np.zeros((L, L), dtype=np.float32)
-    probs[:lenA, lenA:] = block
-    probs[lenA:, :lenA] = block.T
-    probs = probs.astype(np.float16)
 
     np.savez_compressed(out_dir / "contact.npz", probs=probs, length=np.int32(L))
     print(f"[drn] WROTE {out_dir/'contact.npz'}  shape={probs.shape}  block={block.shape}", flush=True)

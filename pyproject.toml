@@ -51,4 +51,5 @@ markers = [
     "model_esmfold: esmfold predict smoke",
     "model_msa_pairformer: MSA Pairformer predict smoke",
     "model_colabfold: ColabFold (AF2) predict smoke",
+    "model_drn_1d2d_inter: DRN-1D2D_Inter predict smoke",
 ]
