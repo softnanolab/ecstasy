@@ -99,7 +99,6 @@ drn_1d2d_inter:
   presets:
     full:
       ccmpred_bin: ${TOOLS_ROOT}/ccmpred/bin/ccmpred
-      fasta2aln_bin: ${TOOLS_ROOT}/metapsicov/bin/fasta2aln
       alnstats_bin: ${TOOLS_ROOT}/metapsicov/bin/alnstats
       hhmake_bin: ${TOOLS_ROOT}/hhsuite/bin/hhmake
       hhfilter_bin: ${TOOLS_ROOT}/hhsuite/bin/hhfilter

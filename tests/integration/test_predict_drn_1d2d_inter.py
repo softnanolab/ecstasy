@@ -20,7 +20,7 @@ def _skip_if_unavailable():
     m = load_model("drn_1d2d_inter")
     p = m.params
     # Resolved tool/weight paths the runner shells out to must exist.
-    for key in ("ccmpred_bin", "fasta2aln_bin", "alnstats_bin", "hhmake_bin",
+    for key in ("ccmpred_bin", "alnstats_bin", "hhmake_bin",
                 "hhfilter_bin", "esm1b_weights", "esm_msa1b_weights"):
         if key not in p or not Path(p[key]).exists():
             pytest.skip(f"drn_1d2d_inter {key} not found at {p.get(key)}")

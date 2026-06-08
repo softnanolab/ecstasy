@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from ecstasy.models._runners.drn_1d2d_inter_runner import (
+    _a3m_to_aln,
     _chain_a3m_from_rows,
     _embed_block,
     _paired_a3m_from_csvs,
@@ -81,3 +82,12 @@ def test_paired_a3m_query_only_when_no_common_species():
     rowsB = [(0, "QB"), (2, "YB")]
     paired = _paired_a3m_from_csvs(rowsA, rowsB, "paired")
     assert paired.splitlines() == [">paired", "QAQB"]
+
+
+def test_a3m_to_aln_strips_headers_and_insertions():
+    # a3m insertions = lowercase + '.'; '-' is a match-state gap and is KEPT. Output is
+    # headerless and every row is the query-length (4) match-state alignment.
+    a3m = ">q\nABCD\n>h1\nABzzCD\n>h2\nA-cdCD\n"
+    aln = _a3m_to_aln(a3m)
+    assert aln.splitlines() == ["ABCD", "ABCD", "A-CD"]
+    assert {len(r) for r in aln.splitlines()} == {4}

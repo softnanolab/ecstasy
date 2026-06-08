@@ -20,7 +20,7 @@ Reads a JSON bundle from stdin:
 
 params (resolved ${...} paths from the registry preset):
   drn_root          repo dir of the DRN submodule (default: computed from __file__)
-  ccmpred_bin, fasta2aln_bin, alnstats_bin, hhmake_bin, hhfilter_bin
+  ccmpred_bin, alnstats_bin, hhmake_bin, hhfilter_bin
   esm1b_weights, esm_msa1b_weights      ESM-1b / ESM-MSA-1b .pt (regression .pt alongside)
   model_dir         dir holding the 7 trained ResNet weights named 1..7
 
@@ -130,6 +130,31 @@ def _paired_a3m_from_csvs(rowsA: list[tuple[int, str]], rowsB: list[tuple[int, s
     return "\n".join(out) + "\n"
 
 
+_A3M_INSERTION = str.maketrans("", "", "abcdefghijklmnopqrstuvwxyz.")
+
+
+def _a3m_to_aln(a3m_text: str) -> str:
+    """Convert an a3m alignment to CCMpred's ``.aln`` format: one sequence per line,
+    headers dropped, a3m insertions removed (lowercase letters + ``.``), so every row
+    is the query-length match-state alignment CCMpred/alnstats consume.
+
+    Replaces the upstream ``fasta2aln`` binary, which is shipped x86-only and won't
+    run on aarch64 — and is just this insertion-stripping conversion.
+    """
+    out: list[str] = []
+    seq: list[str] = []
+    for line in a3m_text.splitlines():
+        if line.startswith(">"):
+            if seq:
+                out.append("".join(seq).translate(_A3M_INSERTION))
+                seq = []
+        elif line:
+            seq.append(line.strip())
+    if seq:
+        out.append("".join(seq).translate(_A3M_INSERTION))
+    return "\n".join(out) + "\n"
+
+
 def main() -> None:
     import torch  # lazy: only present in the DRN env (keeps helpers import-clean elsewhere)
 
@@ -168,7 +193,6 @@ def main() -> None:
 
     # Tool / weight paths (registry preset resolves the ${...} placeholders).
     ccmpred = cfg["ccmpred_bin"]
-    fasta2aln = cfg["fasta2aln_bin"]
     alnstats = cfg["alnstats_bin"]
     hhmake = cfg["hhmake_bin"]
     hhfilter = cfg["hhfilter_bin"]
@@ -217,7 +241,7 @@ def main() -> None:
     filter_a3mA = rp / "filteredA.a3m"
     filter_a3mB = rp / "filteredB.a3m"
     _run(hhfilter, "-i", paired_a3m, "-o", filter_paired_a3m, "-diff", "256")
-    _run(fasta2aln, paired_a3m, paired_aln)
+    paired_aln.write_text(_a3m_to_aln(paired_a3m.read_text()))  # was: fasta2aln (x86-only)
     _run(hhfilter, "-i", a3mA, "-o", filter_a3mA, "-diff", "256")
     _run(hhfilter, "-i", a3mB, "-o", filter_a3mB, "-diff", "256")
 

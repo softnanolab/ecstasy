@@ -106,21 +106,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-say "4/6  alnstats + fasta2aln"
+say "4/6  alnstats"
 # ---------------------------------------------------------------------------
-# alnstats: build from PSIPRED metapsicov src. fasta2aln: prebuilt script from
-# kad-ecoli/hhsuite2 (a perl/awk converter; chmod +x).
+# alnstats: build from PSIPRED metapsicov src. (The a3m->aln conversion upstream
+# does with the x86-only fasta2aln binary is done in-runner now — _a3m_to_aln —
+# so nothing to fetch for it.)
 mkdir -p "$TOOLS/metapsicov/bin"
 if [ ! -x "$TOOLS/metapsicov/bin/alnstats" ]; then
   B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
   git clone --depth 1 https://github.com/psipred/metapsicov.git "$B/metapsicov"
   "${CC:-gcc}" -O3 -o "$TOOLS/metapsicov/bin/alnstats" "$B/metapsicov/src/alnstats.c" -lm
   trap - EXIT; rm -rf "$B"
-fi
-if [ ! -x "$TOOLS/metapsicov/bin/fasta2aln" ]; then
-  curl -fsSL https://raw.githubusercontent.com/kad-ecoli/hhsuite2/master/bin/fasta2aln \
-    -o "$TOOLS/metapsicov/bin/fasta2aln"
-  chmod +x "$TOOLS/metapsicov/bin/fasta2aln"
 fi
 
 # ---------------------------------------------------------------------------
