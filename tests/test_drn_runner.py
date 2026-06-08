@@ -65,7 +65,10 @@ def test_chain_a3m_puts_query_first_with_all_rows():
     a3m = _chain_a3m_from_rows(rows, "A")
     lines = a3m.splitlines()
     assert lines[0] == ">A" and lines[1] == "QUERY"        # query first, clean header
-    assert lines[2:] == [">A_1_k2", "HOMOLOG", ">A_2_k-1", "UNPAIR"]
+    # homolog headers must NOT start with the query name (else LoadHHM's prefix match
+    # shadows the query) -> ">h<i>", not ">A_<i>".
+    assert lines[2:] == [">h1_k2", "HOMOLOG", ">h2_k-1", "UNPAIR"]
+    assert not any(ln.startswith(">A") and ln != ">A" for ln in lines if ln.startswith(">"))
 
 
 def test_paired_a3m_joins_on_shared_key_and_drops_unpaired():

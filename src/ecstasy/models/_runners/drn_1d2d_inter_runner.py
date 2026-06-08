@@ -101,11 +101,14 @@ def _chain_a3m_from_rows(rows: list[tuple[int, str]], query_name: str) -> str:
     """Render a chain's boltz CSV rows as a per-chain a3m (query first).
 
     Used for DRN's per-chain features (PSSM, ESM-MSA-1b repr), which need depth but
-    NOT pairing — so synthetic headers are fine.
+    NOT pairing — so synthetic headers are fine. Homolog headers MUST NOT start with
+    ``query_name``: DRN's LoadHHM picks the query out of hhmake's .hhm SEQ block by
+    prefix-matching ``'>' + name``, so ``>A_1`` would shadow the query ``>A`` and the
+    PSSM would load the wrong sequence (use ``>h<i>`` instead).
     """
     out: list[str] = []
     for i, (key, seq) in enumerate(rows):
-        out.append(f">{query_name}" if i == 0 else f">{query_name}_{i}_k{key}")
+        out.append(f">{query_name}" if i == 0 else f">h{i}_k{key}")
         out.append(seq)
     return "\n".join(out) + "\n"
 
