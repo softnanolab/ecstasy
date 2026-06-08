@@ -27,3 +27,4 @@ scripts/*.sbatch
 
 # Local cache of the Notion benchmarking Registry (notion_pull.py output)
 registry.local.yaml
+core

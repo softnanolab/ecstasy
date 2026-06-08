@@ -94,7 +94,20 @@ if [ ! -x "$TOOLS/ccmpred/bin/ccmpred" ]; then
   cmake_flags=(-DCMAKE_BUILD_TYPE=Release -DCURSES_NEED_NCURSES=TRUE
     -DCURSES_LIBRARY="$NCURSES_LIB" -DCURSES_INCLUDE_PATH=/usr/include
     -DCMAKE_EXE_LINKER_FLAGS=-ltinfo)
-  [ "${CCMPRED_CUDA:-0}" = "1" ] || cmake_flags+=(-DWITH_CUDA=OFF)
+  # GPU build by default: val_seq_pair complexes are long (median ~570 res) and
+  # CCMpred is O(L^2) per iteration, so the CPU build takes tens of minutes each —
+  # the GPU build runs the same protein in ~1-2 min. Needs nvcc (set CUDACXX, or
+  # `module load cuda/12.6`; on Isambard the hpc_sdk nvcc below). CCMPRED_CUDA=0 to
+  # force the (much slower) CPU build; CCMPRED_CUDA_ARCH defaults to 90 (Hopper).
+  NVCC="${CUDACXX:-$(command -v nvcc || ls /opt/nvidia/hpc_sdk/*/*/cuda/*/bin/nvcc 2>/dev/null | head -1)}"
+  if [ "${CCMPRED_CUDA:-1}" = "1" ] && [ -n "$NVCC" ]; then
+    say "    CCMpred GPU build (nvcc=$NVCC arch=${CCMPRED_CUDA_ARCH:-90})"
+    cmake_flags+=(-DWITH_CUDA=ON -DCMAKE_CUDA_COMPILER="$NVCC"
+      -DCMAKE_CUDA_ARCHITECTURES="${CCMPRED_CUDA_ARCH:-90}")
+  else
+    say "    CCMpred CPU build (no nvcc / CCMPRED_CUDA=0) — SLOW on long complexes"
+    cmake_flags+=(-DWITH_CUDA=OFF)
+  fi
   env -u LIBRARY_PATH -u CMAKE_PREFIX_PATH -u CPATH -u LD_LIBRARY_PATH \
     cmake -S "$B/CCMpred" -B "$B/CCMpred/build" "${cmake_flags[@]}"
   env -u LIBRARY_PATH -u LD_LIBRARY_PATH make -C "$B/CCMpred/build" -j "$NCPUS"

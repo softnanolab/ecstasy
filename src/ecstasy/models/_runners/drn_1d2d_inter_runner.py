@@ -253,11 +253,11 @@ def main() -> None:
     _write_fasta(paired_seq, "paired", seqA + seqB)
 
     # 4. CCMpred + alnstats
-    # CCMpred defaults to 1 OpenMP thread; deep complex MSAs (up to ~8k seqs) then
-    # dominate wall time. Use the SLURM-allocated cores (cap 64 — it's bandwidth-bound).
-    ccm_threads = str(min(len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity")
-                          else (os.cpu_count() or 8), 64))
-    _run(ccmpred, "-t", ccm_threads, "-R", paired_aln, rp / "paired.ccmpred")
+    # CCMpred coevolution on the full complex is O(L^2) per iteration; val_seq_pair
+    # complexes are long (median ~570 res) so the CPU build takes tens of minutes each.
+    # The GPU build (scripts/install builds it with CUDA) runs on device 0 BY DEFAULT —
+    # do NOT pass -t: CCMpred treats any -t as "disable GPU, use CPU" (ccmpred.c:279).
+    _run(ccmpred, "-R", paired_aln, rp / "paired.ccmpred")
     _run(alnstats, paired_aln, rp / "paired.singout", rp / "paired.pairout")
 
     # 5. ESM-1b attention
