@@ -22,6 +22,10 @@ params (resolved ${...} paths from the registry preset):
 
 Writes:
   <out_dir>/contact.npz   — probs (L, L) float16, length int32
+
+DRN is intentionally OUTSIDE the FLOPs-profiling scope (CLAUDE.md lists only
+boltz2/esmfold), so this runner ignores ``bundle["profile"]`` and emits no FLOPs
+sidecar by design.
 """
 from __future__ import annotations
 
@@ -37,6 +41,17 @@ import torch
 
 def _write_fasta(path: Path, name: str, seq: str) -> None:
     path.write_text(f">{name}\n{seq}\n")
+
+
+def _run(*args) -> None:
+    """Run an external tool in list form, aborting loudly on non-zero exit.
+
+    Replaces ``os.system`` (which swallows the exit code): a failed CCMpred /
+    hhfilter / alnstats stage would otherwise leave empty feature files that only
+    surface as a cryptic shape error deep in ``load_feature.*``. Matches the
+    list-form ``subprocess.run([...], check=True)`` house style of the other runners.
+    """
+    subprocess.run([str(a) for a in args], check=True)
 
 
 def main() -> None:
@@ -103,18 +118,18 @@ def main() -> None:
     paired_aln = rp / "paired.aln"
     filter_a3mA = rp / "filteredA.a3m"
     filter_a3mB = rp / "filteredB.a3m"
-    os.system(f"{hhfilter} -i {paired_a3m} -o {filter_paired_a3m} -diff 256")
-    os.system(f"{fasta2aln} {paired_a3m} {paired_aln}")
-    os.system(f"{hhfilter} -i {a3mA} -o {filter_a3mA} -diff 256")
-    os.system(f"{hhfilter} -i {a3mB} -o {filter_a3mB} -diff 256")
+    _run(hhfilter, "-i", paired_a3m, "-o", filter_paired_a3m, "-diff", "256")
+    _run(fasta2aln, paired_a3m, paired_aln)
+    _run(hhfilter, "-i", a3mA, "-o", filter_a3mA, "-diff", "256")
+    _run(hhfilter, "-i", a3mB, "-o", filter_a3mB, "-diff", "256")
 
     # 3. paired seq
     paired_seq = rp / "paired.fasta"
     _write_fasta(paired_seq, "paired", seqA + seqB)
 
     # 4. CCMpred + alnstats
-    os.system(f"{ccmpred} -R {paired_aln} {rp/'paired.ccmpred'}")
-    os.system(f"{alnstats} {paired_aln} {rp/'paired.singout'} {rp/'paired.pairout'}")
+    _run(ccmpred, "-R", paired_aln, rp / "paired.ccmpred")
+    _run(alnstats, paired_aln, rp / "paired.singout", rp / "paired.pairout")
 
     # 5. ESM-1b attention
     esm1b_attn.main(esm1b_w, str(paired_seq), str(fasA),
@@ -124,10 +139,10 @@ def main() -> None:
                     str(rp / "msa1b_rt.attn"), str(rp / "msa1b_sw.attn"), device)
 
     # 7. PSSM (hhm -> pkl)
-    os.system(f"{hhmake} -i {a3mA} -o {rp/'A.hhm'}")
-    subprocess.run([py, loadhhm, str(rp / "A.hhm")], check=True)
-    os.system(f"{hhmake} -i {a3mB} -o {rp/'B.hhm'}")
-    subprocess.run([py, loadhhm, str(rp / "B.hhm")], check=True)
+    _run(hhmake, "-i", a3mA, "-o", rp / "A.hhm")
+    _run(py, loadhhm, rp / "A.hhm")
+    _run(hhmake, "-i", a3mB, "-o", rp / "B.hhm")
+    _run(py, loadhhm, rp / "B.hhm")
 
     # 8. ESM-1b representations
     esm1b_repr.main(esm1b_w, str(fasA), str(rp / "A_esm1b.repr"), device)

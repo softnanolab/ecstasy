@@ -24,9 +24,12 @@ say "editable install of mint (+ deps)"
 ( cd "$MENTOS" && "$UV" pip install -e . )
 
 # The cu126 torch + lightning fix-up (modules/mentos/README.md, Isambard note).
-say "force-reinstall torch (cu126) + lightning"
-"$UV" pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu126
+# Lightning FIRST: it pulls a default (PyPI/cu12x) torch as a transitive dep, so it
+# must run before the cu126 pin. Re-pin torch LAST from the cu126 index so the
+# intended build wins and lightning can't clobber it.
+say "force-reinstall lightning, then re-pin torch (cu126) last"
 "$UV" pip install --force-reinstall lightning
+"$UV" pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu126
 
 say "verify"
 "$ENV_PATH/bin/python" -c "import mint, torch, pandas, pyarrow; print('mint ok; torch', torch.__version__)"

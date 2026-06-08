@@ -56,14 +56,22 @@ class MentosSquareDataset(Dataset):
 
         # GT .pt files pickle a `mentos.dataclasses.Sample`, but the package was
         # renamed `mentos` -> `mint`. Alias so unpickling resolves to mint's
-        # (identical) Sample dataclass. Lazy: only needed in a scoring env (mint
-        # installed), never in the torch-less orchestrator env.
+        # (identical) Sample dataclass. Lazy import: deferred to scoring time so the
+        # torch-less orchestrator env never pays for it. NOTE the two envs straddle
+        # both names by design (see mentos_package_and_venvs memory): the *scoring*
+        # env ships `mint` (aliased here), the *runner* env ships `mentos` — do not
+        # "unify" them. gt_for is called unconditionally from score(), so a missing
+        # mint is a misconfigured scoring env, not a no-op: surface it loudly rather
+        # than letting torch.load die with an opaque `ModuleNotFoundError: mentos`.
         try:
             import mint.dataclasses
-            sys.modules.setdefault("mentos", sys.modules["mint"])
-            sys.modules.setdefault("mentos.dataclasses", mint.dataclasses)
-        except ImportError:
-            pass
+        except ImportError as e:
+            raise ImportError(
+                "Loading MENTOS ground-truth .pt requires the `mint` package; "
+                "GT scoring must run in .venv-mentos (scripts/install/mentos.sh)."
+            ) from e
+        sys.modules.setdefault("mentos", sys.modules["mint"])
+        sys.modules.setdefault("mentos.dataclasses", mint.dataclasses)
 
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
