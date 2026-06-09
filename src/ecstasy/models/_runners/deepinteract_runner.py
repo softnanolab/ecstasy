@@ -40,32 +40,58 @@ def _embed_block(block: np.ndarray, lenA: int, lenB: int) -> np.ndarray:
     return probs.astype(np.float16)
 
 
-def _patch_atom3_for_aarch64() -> None:
+def _patch_atom3_for_aarch64(real_feats: bool = False) -> None:
     """Runtime workarounds for running DeepInteract's 2021 atom3 pipeline on
-    Linux/aarch64 (it was developed on case-insensitive macOS with x86 PSAIA):
+    Linux/aarch64 (it was developed on case-insensitive macOS with x86 PSAIA + mkdssp).
 
-    * PSAIA is a QT4 GUI tool with no aarch64 build — make its call a no-op so the
-      protrusion (CX) features fall back to DeepInteract's DEFAULT_MISSING_PROTRUSION
-      imputation (the only feature set that can't be reproduced here).
-    * atom3 writes parsed pkls under a lowercase group dir but reads them via
-      ``get_pdb_code(...)[1:3].upper()`` — harmless on case-insensitive FS, a
-      FileNotFoundError on Linux. Make read_pickle resolve the group-dir case.
+    PSAIA (QT4) and DSSP/mkdssp have no aarch64 build. Two modes:
+
+    * ``real_feats=False`` (DEFAULT): PSAIA is a no-op writing an empty .tbl, so the 6
+      protrusion features fall back to DeepInteract's DEFAULT_MISSING_PROTRUSION; DSSP
+      likewise imputes (RSA NaN, SS '-'). This is the REPORTED configuration — see below.
+    * ``real_feats=True``: replace PSAIA with a geometric CX-protrusion reimplementation
+      (_di_aarch64_feats.write_psaia_cx_tbl, real 6-stat .tbl) and DSSP with a
+      ShrakeRupley-SASA RSA + pydssp 3-state-SS dict. VERIFIED NEGATIVE RESULT: these
+      faithful-but-approximate features do NOT match PSAIA/mkdssp's trained distribution
+      and measurably *degrade* inter-chain P@K vs the consistent all-imputed mode
+      (val_seq_pair 40-sample tol2: 0.029 imputed -> 0.010 real). Kept for reproducibility;
+      not used for the headline number. So DeepInteract's weakness here is intrinsic to the
+      model + ESMFold-monomer inputs, not a feature-availability artifact.
+
+    Always: atom3 writes parsed pkls under a lowercase group dir but reads them via
+    ``get_pdb_code(...)[1:3].upper()`` — a FileNotFoundError on (case-sensitive) Linux.
+    Make read_pickle resolve the group-dir case.
     """
     import atom3.conservation as _cons
 
-    def _psaia_stub(psaia_dir, config_file, file_list_file):
-        # Write an empty-but-valid .tbl per PDB (a 'chain' header, no residue rows) so
-        # postprocessing's rglob('<pdb_code>*.tbl')[struct_idx] resolves and the parser
-        # returns an empty frame -> protrusion falls back to DEFAULT_MISSING_PROTRUSION.
-        out_dir = os.path.dirname(file_list_file)
-        for line in open(file_list_file):
-            p = line.strip()
-            if not p.endswith(".pdb"):
-                continue
-            name = os.path.splitext(os.path.basename(p))[0]
-            with open(os.path.join(out_dir, name + ".tbl"), "w") as f:
-                f.write("PSAIA unavailable on aarch64 (protrusion imputed)\nchain\n")
-    _cons._psaia = _psaia_stub
+    if real_feats:
+        import _di_aarch64_feats as _feats
+
+        def _psaia_cx(psaia_dir, config_file, file_list_file):
+            out_dir = os.path.dirname(file_list_file)
+            for line in open(file_list_file):
+                p = line.strip()
+                if not p.endswith(".pdb"):
+                    continue
+                name = os.path.splitext(os.path.basename(p))[0]
+                _feats.write_psaia_cx_tbl(p, os.path.join(out_dir, name + ".tbl"))
+        _cons._psaia = _psaia_cx
+        import project.utils.dips_plus_utils as _dpu
+        _dpu.get_dssp_dict_for_pdb_model = lambda _model, raw: _feats.dssp_dict_for_pdb(raw)
+    else:
+        def _psaia_stub(psaia_dir, config_file, file_list_file):
+            # Empty-but-valid .tbl per PDB (a 'chain' header, no rows) so the parser's
+            # rglob('<pdb_code>*.tbl')[struct_idx] resolves -> DEFAULT_MISSING_PROTRUSION.
+            out_dir = os.path.dirname(file_list_file)
+            for line in open(file_list_file):
+                p = line.strip()
+                if not p.endswith(".pdb"):
+                    continue
+                name = os.path.splitext(os.path.basename(p))[0]
+                with open(os.path.join(out_dir, name + ".tbl"), "w") as f:
+                    f.write("PSAIA unavailable on aarch64 (protrusion imputed)\nchain\n")
+        _cons._psaia = _psaia_stub
+
     import pandas as _pd
     _orig = _pd.read_pickle
 
@@ -122,7 +148,9 @@ def main() -> None:
     # hhblits (atom3 shells out to it for the MSA/profile features) must be on PATH.
     if cfg.get("hhsuite_bin"):
         os.environ["PATH"] = f"{Path(cfg['hhsuite_bin']).parent}:{os.environ.get('PATH','')}"
-    _patch_atom3_for_aarch64()
+    # Default: imputed surface features (the reported config). real_surface_feats=true
+    # opts into the reimplemented CX/DSSP — a verified-negative experiment, see the patch.
+    _patch_atom3_for_aarch64(real_feats=bool(cfg.get("real_surface_feats", False)))
 
     from project.lit_model_predict import InputDataset
     from project.utils.deepinteract_modules import LitGINI
@@ -131,6 +159,11 @@ def main() -> None:
     import pytorch_lightning as pl
 
     work = out_dir / "di_work"
+    # atom3 caches external features (PSAIA .tbl, hhblits .hhm) under work/ and reuses any
+    # that already exist — so a stale di_work from a prior run silently masks the aarch64
+    # CX/DSSP patches (the cached stub .tbl wins). Always start from a clean work dir.
+    import shutil
+    shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
     ds = InputDataset(
         left_pdb_filepath=str(pdbA), right_pdb_filepath=str(pdbB),
