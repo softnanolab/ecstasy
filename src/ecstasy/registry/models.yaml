@@ -83,28 +83,6 @@ msa_pairformer:
       weights_dir: ${ECSTASY_ROOT}/weights/msa_pairformer
       hhfilter_bin: ${TOOLS_ROOT}/hhsuite/bin/hhfilter
 
-# DRN-1D2D_Inter (Si & Yan, Brief. Bioinform. 2023) — sequence-only inter-protein
-# contact baseline (no monomer structure). Uses msa=boltz_csv: the runner reuses
-# Boltz's taxonomy pairing (the CSV `key` column) to build DRN's paired complex a3m,
-# sidestepping DRN's header-parsed pair_msa (zero pairing on ColabFold-style a3ms).
-# Install: scripts/install/drn_1d2d_inter.sh (builds the env + CCMpred/alnstats/fasta2aln,
-# fetches ESM-1b/ESM-MSA-1b weights + the 7-member trained ensemble). The single preset
-# carries the resolved tool/weight paths the runner shells out to; drn_root + the trained
-# model_dir default to the modules/ submodule (no scratch placeholder).
-drn_1d2d_inter:
-  runner: drn_1d2d_inter_runner.py
-  env: ${ENVS_ROOT}/drn_1d2d_inter
-  msa: boltz_csv
-  default_preset: full
-  presets:
-    full:
-      ccmpred_bin: ${TOOLS_ROOT}/ccmpred/bin/ccmpred
-      alnstats_bin: ${TOOLS_ROOT}/metapsicov/bin/alnstats
-      hhmake_bin: ${TOOLS_ROOT}/hhsuite/bin/hhmake
-      hhfilter_bin: ${TOOLS_ROOT}/hhsuite/bin/hhfilter
-      esm1b_weights: ${ECSTASY_ROOT}/weights/drn_1d2d_inter/esm/esm1b_t33_650M_UR50S.pt
-      esm_msa1b_weights: ${ECSTASY_ROOT}/weights/drn_1d2d_inter/esm/esm_msa1b_t12_100M_UR50S.pt
-
 colabfold:
   runner: colabfold_runner.py
   env: ${ENVS_ROOT}/.venv-colabfold

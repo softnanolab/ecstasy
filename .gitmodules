@@ -18,6 +18,3 @@
 [submodule "third_party/colabfold-local"]
 	path = third_party/colabfold-local
 	url = git@github.com:softnanolab/colabfold-local.git
-[submodule "modules/drn_1d2d_inter"]
-	path = modules/drn_1d2d_inter
-	url = https://github.com/ChengfeiYan/DRN-1D2D_Inter.git

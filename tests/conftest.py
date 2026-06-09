@@ -22,8 +22,6 @@ VENVS: dict[str, Path] = {
     "boltz":     REPO_ROOT / "envs" / ".venv-boltz",
     "esmfold":   REPO_ROOT / "envs" / ".venv-esmfold",
     "colabfold": REPO_ROOT / "envs" / ".venv-colabfold",
-    # DRN is a conda/micromamba env (py3.8), not a uv .venv-* — note the bare dir name.
-    "drn_1d2d_inter": REPO_ROOT / "envs" / "drn_1d2d_inter",
 }
 
 # Default smoke dataset (small, single-sequence fallback works without MSAs).
