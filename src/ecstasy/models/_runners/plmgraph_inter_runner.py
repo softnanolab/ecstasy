@@ -195,23 +195,39 @@ def main() -> None:
     _run(ccmpred, "-R", paired_aln, rp / "paired.ccmpred")
     _run(alnstats, paired_aln, rp / "paired.singout", rp / "paired.pairout")
 
+    # --- optional FLOPs profiling of the NEURAL forwards. CCMpred is excluded (it's an
+    # iterative coevolution solver, the analog of MSA search — a marker, not FLOPs). The
+    # ESMFold structure-prediction FLOPs (the per-chain PDB inputs depend on it) are
+    # measured offline per chain and added when aggregating. (FLOPS_BENCHMARK_PLAN.md)
+    profile = bool(bundle.get("profile"))
+    _flops = {"total": 0, "by": {}}
+
+    def _prof(label, fn, *a, **k):
+        if not profile:
+            return fn(*a, **k)
+        import _flops as _F
+        out, p = _F.profile_call(fn, *a, **k)
+        _flops["total"] += p["flops"]
+        _flops["by"][label] = _flops["by"].get(label, 0) + p["flops"]
+        return out
+
     # ESM-MSA-1b attention
-    msa1b_attn.main(esm_msa1b_w, str(filter_paired_a3m), str(fasA),
-                    str(rp / "msa1b_rt.attn"), str(rp / "msa1b_sw.attn"), device)
+    _prof("esm_msa1b", msa1b_attn.main, esm_msa1b_w, str(filter_paired_a3m), str(fasA),
+          str(rp / "msa1b_rt.attn"), str(rp / "msa1b_sw.attn"), device)
     # PSSM (hhmake -> LoadHHM)
     _run(hhmake, "-i", a3mA, "-o", rp / "A.hhm"); _run(py, loadhhm, rp / "A.hhm")
     _run(hhmake, "-i", a3mB, "-o", rp / "B.hhm"); _run(py, loadhhm, rp / "B.hhm")
     # ESM-1b / ESM-MSA-1b representations
-    esm1b_repr.main(esm1b_w, str(fasA), str(rp / "A_esm1b.repr"), device)
-    esm1b_repr.main(esm1b_w, str(fasB), str(rp / "B_esm1b.repr"), device)
-    msa1b_repr.main(esm_msa1b_w, str(filter_a3mA), str(rp / "A_msa1b.repr"), device)
-    msa1b_repr.main(esm_msa1b_w, str(filter_a3mB), str(rp / "B_msa1b.repr"), device)
+    _prof("esm1b", esm1b_repr.main, esm1b_w, str(fasA), str(rp / "A_esm1b.repr"), device)
+    _prof("esm1b", esm1b_repr.main, esm1b_w, str(fasB), str(rp / "B_esm1b.repr"), device)
+    _prof("esm_msa1b", msa1b_repr.main, esm_msa1b_w, str(filter_a3mA), str(rp / "A_msa1b.repr"), device)
+    _prof("esm_msa1b", msa1b_repr.main, esm_msa1b_w, str(filter_a3mB), str(rp / "B_msa1b.repr"), device)
     # ESM-IF1 representations (from structure)
-    esmif_repr.main(esmif_w, str(pdbA), str(rp / "A_esmif.repr"), device)
-    esmif_repr.main(esmif_w, str(pdbB), str(rp / "B_esmif.repr"), device)
+    _prof("esm_if1", esmif_repr.main, esmif_w, str(pdbA), str(rp / "A_esmif.repr"), device)
+    _prof("esm_if1", esmif_repr.main, esmif_w, str(pdbB), str(rp / "B_esmif.repr"), device)
     # GVP graphs (from structure)
-    pdb_graph.main(str(pdbA), str(rp / "graphA.pkl"))
-    pdb_graph.main(str(pdbB), str(rp / "graphB.pkl"))
+    _prof("pdb_graph", pdb_graph.main, str(pdbA), str(rp / "graphA.pkl"))
+    _prof("pdb_graph", pdb_graph.main, str(pdbB), str(rp / "graphB.pkl"))
 
     # load features + run the 7-member graph ResNet ensemble
     featureA, featureB = load_feature.graph_feature(str(rp))
@@ -233,14 +249,23 @@ def main() -> None:
     for i in range(1, 8):
         model.load_state_dict(torch.load(str(model_dir / str(i)), map_location=device))
         model.to(device).eval()
-        acc += model(nodeA, edgeA, eidxA, nodeB, edgeB, eidxB, rt_p2d).detach().cpu()
-        acc += model(nodeB, edgeB, eidxB, nodeA, edgeA, eidxA, sw_p2d).T.detach().cpu()
+        acc += _prof("ensemble", model, nodeA, edgeA, eidxA, nodeB, edgeB, eidxB, rt_p2d).detach().cpu()
+        acc += _prof("ensemble", model, nodeB, edgeB, eidxB, nodeA, edgeA, eidxA, sw_p2d).T.detach().cpu()
     block = (acc / 14.0).numpy()
 
     probs = _embed_block(block, lenA, lenB)
     L = lenA + lenB
     np.savez_compressed(out_dir / "contact.npz", probs=probs, length=np.int32(L))
     print(f"[plmgraph] WROTE {out_dir/'contact.npz'} shape={probs.shape} block={block.shape}", flush=True)
+
+    if profile:
+        import _flops as _F
+        _F.write_flops_sidecar(
+            out_dir, {"flops": _flops["total"], "macs": _flops["total"] // 2, "by_module": _flops["by"]},
+            model="plmgraph_inter", L=L, lenA=lenA, lenB=lenB,
+            note="neural forwards only (ESM-1b/MSA-1b/IF1 + GVP + ResNet ensemble); CCMpred "
+                 "excluded (solver); ESMFold structure-prediction FLOPs added offline per chain")
+        print(f"[plmgraph] FLOPS total={_flops['total']:.3e} by={ {k: f'{v:.2e}' for k,v in _flops['by'].items()} }", flush=True)
 
 
 if __name__ == "__main__":
