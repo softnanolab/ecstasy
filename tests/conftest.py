@@ -22,6 +22,8 @@ VENVS: dict[str, Path] = {
     "boltz":     REPO_ROOT / "envs" / ".venv-boltz",
     "esmfold":   REPO_ROOT / "envs" / ".venv-esmfold",
     "colabfold": REPO_ROOT / "envs" / ".venv-colabfold",
+    "plmgraph_inter": REPO_ROOT / "envs" / "plmgraph_inter",
+    "deepinteract": REPO_ROOT / "envs" / "deepinteract",
 }
 
 # Default smoke dataset (small, single-sequence fallback works without MSAs).

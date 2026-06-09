@@ -55,6 +55,9 @@ for pkg in torch-scatter torch-sparse torch-cluster; do
 done
 "$PY" -c "import gvp" 2>/dev/null || \
   "$UV" pip install --python "$PY" --no-deps "git+https://github.com/drorlab/gvp-pytorch.git"
+# biotite>=0.39 renamed filter_backbone (used by fair-esm's ESM-IF); alias it.
+SP="$("$PY" -c 'import site; print(site.getsitepackages()[0])')"
+grep -q "^filter_backbone = " "$SP/biotite/structure/__init__.py" || printf '\nfrom .filter import filter_peptide_backbone as filter_backbone\n' >> "$SP/biotite/structure/__init__.py"
 
 # ---------------------------------------------------------------------------
 say "3/5  external tools (CCMpred GPU, alnstats, fasta2aln-shim) — reuse hh-suite"

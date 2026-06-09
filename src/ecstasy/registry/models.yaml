@@ -83,6 +83,42 @@ msa_pairformer:
       weights_dir: ${ECSTASY_ROOT}/weights/msa_pairformer
       hhfilter_bin: ${TOOLS_ROOT}/hhsuite/bin/hhfilter
 
+# PLMGraph-Inter (Si & Yan, eLife 2024) — DRN's successor: same MSA/coevolution
+# pipeline PLUS ESM-IF1 + GVP structure graphs, so it needs a per-chain PDB structure
+# in addition to the boltz_csv MSA. struct_dir holds ESMFold monomers named
+# <entry_id>_<chain_id>.pdb (generated as a prerequisite for sequence-only splits).
+# Install: scripts/install/plmgraph_inter.sh. Outside the FLOPs-profiling scope.
+plmgraph_inter:
+  runner: plmgraph_inter_runner.py
+  env: ${ENVS_ROOT}/plmgraph_inter
+  msa: boltz_csv
+  default_preset: full
+  presets:
+    full:
+      struct_dir: ${DATA_ROOT}/structures/esmfold
+      ccmpred_bin: ${TOOLS_ROOT}/ccmpred/bin/ccmpred
+      alnstats_bin: ${TOOLS_ROOT}/metapsicov/bin/alnstats
+      hhmake_bin: ${TOOLS_ROOT}/hhsuite/bin/hhmake
+      hhfilter_bin: ${TOOLS_ROOT}/hhsuite/bin/hhfilter
+      esm1b_weights: ${ECSTASY_ROOT}/weights/plmgraph_inter/esm/esm1b_t33_650M_UR50S.pt
+      esm_msa1b_weights: ${ECSTASY_ROOT}/weights/plmgraph_inter/esm/esm_msa1b_t12_100M_UR50S.pt
+      esmif_weights: ${ECSTASY_ROOT}/weights/plmgraph_inter/esm/esm_if1_gvp4_t16_142M_UR50.pt
+
+# DeepInteract (Morehead et al., ICLR 2022) — DGL geometric transformer on two
+# per-chain PDB structures + hhblits MSA features. Needs an HHsuite DB (hhsuite_db;
+# uniclust30 for the real eval) and the trained ckpt; DSSP/PSAIA features are imputed
+# when absent. Install: scripts/install/deepinteract.sh. Outside the FLOPs scope.
+deepinteract:
+  runner: deepinteract_runner.py
+  env: ${ENVS_ROOT}/deepinteract
+  msa: none
+  default_preset: full
+  presets:
+    full:
+      struct_dir: ${DATA_ROOT}/structures/esmfold
+      ckpt: ${ECSTASY_ROOT}/weights/deepinteract/LitGINI-GeoTran-DilResNet.ckpt
+      hhsuite_db: ${ECSTASY_ROOT}/weights/deepinteract/hhsuite_db/uniclust30_2018_08/uniclust30_2018_08
+
 colabfold:
   runner: colabfold_runner.py
   env: ${ENVS_ROOT}/.venv-colabfold

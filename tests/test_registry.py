@@ -38,7 +38,8 @@ def test_unknown_dataset_raises():
 
 def test_models_registered_with_presets():
     assert set(model_names()) == {"boltz2", "boltz2_nomsa", "esmfold", "mentos",
-                                  "colabfold", "msa_pairformer"}
+                                  "colabfold", "msa_pairformer",
+                                  "plmgraph_inter", "deepinteract"}
     assert presets_for("boltz2") == ["fast", "full", "r0", "r1", "r3", "r5"]
 
 
