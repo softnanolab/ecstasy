@@ -118,6 +118,7 @@ deepinteract:
       struct_dir: ${DATA_ROOT}/structures/esmfold
       ckpt: ${ECSTASY_ROOT}/weights/deepinteract/LitGINI-GeoTran-DilResNet.ckpt
       hhsuite_db: ${ECSTASY_ROOT}/weights/deepinteract/hhsuite_db/uniclust30_2018_08/uniclust30_2018_08
+      hhsuite_bin: ${TOOLS_ROOT}/hhsuite/bin/hhblits
 
 colabfold:
   runner: colabfold_runner.py

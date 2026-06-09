@@ -40,6 +40,35 @@ def _embed_block(block: np.ndarray, lenA: int, lenB: int) -> np.ndarray:
     return probs.astype(np.float16)
 
 
+def _patch_atom3_for_aarch64() -> None:
+    """Runtime workarounds for running DeepInteract's 2021 atom3 pipeline on
+    Linux/aarch64 (it was developed on case-insensitive macOS with x86 PSAIA):
+
+    * PSAIA is a QT4 GUI tool with no aarch64 build — make its call a no-op so the
+      protrusion (CX) features fall back to DeepInteract's DEFAULT_MISSING_PROTRUSION
+      imputation (the only feature set that can't be reproduced here).
+    * atom3 writes parsed pkls under a lowercase group dir but reads them via
+      ``get_pdb_code(...)[1:3].upper()`` — harmless on case-insensitive FS, a
+      FileNotFoundError on Linux. Make read_pickle resolve the group-dir case.
+    """
+    import atom3.conservation as _cons
+    _cons._psaia = lambda *a, **k: None
+    import pandas as _pd
+    _orig = _pd.read_pickle
+
+    def _ci(path, *a, **k):
+        if isinstance(path, (str, os.PathLike)) and not os.path.exists(path):
+            d, b = os.path.split(str(path))
+            par, grp = os.path.split(d)
+            for alt in (grp.lower(), grp.upper()):
+                cand = os.path.join(par, alt, b)
+                if os.path.exists(cand):
+                    path = cand
+                    break
+        return _orig(path, *a, **k)
+    _pd.read_pickle = _ci
+
+
 def main() -> None:
     import torch
 
@@ -71,6 +100,11 @@ def main() -> None:
                    or (Path(__file__).resolve().parents[4] / "modules" / "deepinteract"))
     sys.path.insert(0, str(di_root))
     os.chdir(di_root)  # DeepInteract resolves config/test paths relative to its repo root
+
+    # hhblits (atom3 shells out to it for the MSA/profile features) must be on PATH.
+    if cfg.get("hhsuite_bin"):
+        os.environ["PATH"] = f"{Path(cfg['hhsuite_bin']).parent}:{os.environ.get('PATH','')}"
+    _patch_atom3_for_aarch64()
 
     from project.lit_model_predict import InputDataset
     from project.utils.deepinteract_modules import LitGINI

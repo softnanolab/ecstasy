@@ -65,8 +65,16 @@ grep -q "^F1 = F1Score" "$SP/torchmetrics/__init__.py" || printf '\nF1 = F1Score
 # (c) pytorch-lightning: re-export types removed in PL>=2.0.
 TYPES="$SP/pytorch_lightning/utilities/types.py"
 grep -q "^EPOCH_OUTPUT" "$TYPES" || printf '\nfrom typing import Any as _Any, Dict as _Dict, List as _List\nEPOCH_OUTPUT = _List[_Dict[str, _Any]]\nSTEP_OUTPUT = _Any\n' >> "$TYPES"
-# (d) biopython: re-expose protein_letters_3to1 (moved) + stub the removed Blast.Applications.
+# (d) biopython: re-expose protein_letters_3to1 (moved) + three_to_one (removed in
+#     biopython>=1.80, used by atom3.sequence) + stub the removed Blast.Applications.
 grep -q "compat re-export" "$SP/Bio/SCOP/Raf.py" || printf '\nfrom Bio.Data.PDBData import protein_letters_3to1  # compat re-export\n' >> "$SP/Bio/SCOP/Raf.py"
+grep -q "def three_to_one" "$SP/Bio/PDB/Polypeptide.py" || cat >> "$SP/Bio/PDB/Polypeptide.py" <<'PYEOF'
+
+
+def three_to_one(resname):  # compat shim (removed in biopython>=1.80)
+    from Bio.Data.PDBData import protein_letters_3to1
+    return protein_letters_3to1.get(resname.strip().upper(), "X")
+PYEOF
 cat > "$SP/Bio/Blast/Applications.py" <<'PYEOF'
 """Stub for Bio.Blast.Applications (removed in BioPython>=1.80). DeepInteract
 inference never runs BLAST; any real use raises a clear error."""
