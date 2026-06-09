@@ -68,7 +68,7 @@ class Ecstasy:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
-            profile=False, checkpoint=None):
+            profile=False, checkpoint=None, shard=None):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
         --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
@@ -76,10 +76,12 @@ class Ecstasy:
         weights/recycles via registry.local.yaml (run notion_pull.py first).
         --profile additionally measures inference FLOPs and writes a flops.json
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
+        --shard 'i/N' processes only every N-th entry (offset i) for parallel jobs;
+        combined with the contact.npz skip the shards never collide and are resumable.
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
-            pipeline.run_predict(r, limit=limit, profile=profile)
+            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard)
             if not no_score:
                 pipeline.run_score(r, limit=limit)
 
