@@ -52,7 +52,20 @@ def _patch_atom3_for_aarch64() -> None:
       FileNotFoundError on Linux. Make read_pickle resolve the group-dir case.
     """
     import atom3.conservation as _cons
-    _cons._psaia = lambda *a, **k: None
+
+    def _psaia_stub(psaia_dir, config_file, file_list_file):
+        # Write an empty-but-valid .tbl per PDB (a 'chain' header, no residue rows) so
+        # postprocessing's rglob('<pdb_code>*.tbl')[struct_idx] resolves and the parser
+        # returns an empty frame -> protrusion falls back to DEFAULT_MISSING_PROTRUSION.
+        out_dir = os.path.dirname(file_list_file)
+        for line in open(file_list_file):
+            p = line.strip()
+            if not p.endswith(".pdb"):
+                continue
+            name = os.path.splitext(os.path.basename(p))[0]
+            with open(os.path.join(out_dir, name + ".tbl"), "w") as f:
+                f.write("PSAIA unavailable on aarch64 (protrusion imputed)\nchain\n")
+    _cons._psaia = _psaia_stub
     import pandas as _pd
     _orig = _pd.read_pickle
 
@@ -72,10 +85,10 @@ def _patch_atom3_for_aarch64() -> None:
 def main() -> None:
     import torch
 
-    # PORT SHIM: PL load_from_checkpoint uses torch.load, which defaults
-    # weights_only=True on torch>=2.6 and refuses the (trusted, local) PL checkpoint.
+    # PORT SHIM: PL load_from_checkpoint passes weights_only=True explicitly on
+    # torch>=2.6, which refuses the (trusted, local) PL checkpoint — FORCE it False.
     _orig = torch.load
-    torch.load = lambda *a, **k: (k.setdefault("weights_only", False), _orig(*a, **k))[1]
+    torch.load = lambda *a, **k: (k.update({"weights_only": False}), _orig(*a, **k))[1]
 
     bundle = json.loads(sys.stdin.read())
     entry_id = bundle["entry_id"]
@@ -84,6 +97,11 @@ def main() -> None:
     out_dir = Path(bundle["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg = bundle.get("params") or {}
+
+    # atom3 uses tempfile.mkdtemp (TMPDIR); the orchestrator may pass a stale
+    # node-local TMPDIR. Point it at a valid per-entry dir.
+    if not os.path.isdir(os.environ.get("TMPDIR", "")):
+        _t = out_dir / "tmp"; _t.mkdir(exist_ok=True); os.environ["TMPDIR"] = str(_t)
 
     if len(sequences) != 2:
         raise ValueError(f"DeepInteract handles exactly 2 chains, got {len(sequences)} for {entry_id}")
@@ -108,6 +126,7 @@ def main() -> None:
 
     from project.lit_model_predict import InputDataset
     from project.utils.deepinteract_modules import LitGINI
+    from project.utils.deepinteract_utils import dgl_picp_collate
     from torch.utils.data import DataLoader
     import pytorch_lightning as pl
 
@@ -120,11 +139,13 @@ def main() -> None:
         psaia_config=str(di_root / "project" / "datasets" / "builder" / "psaia_config_file_input.txt"),
         hhsuite_db=cfg["hhsuite_db"], knn=20, geo_nbrhd_size=2, self_loops=True, force_reload=True)
     loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0,
-                        collate_fn=lambda x: x[0])
+                        collate_fn=dgl_picp_collate)
 
     model = LitGINI.load_from_checkpoint(cfg["ckpt"], map_location="cpu").eval()
-    accel = "gpu" if torch.cuda.is_available() else "cpu"
-    trainer = pl.Trainer(accelerator=accel, devices=1, logger=False,
+    # DGL's aarch64 wheel is CPU-only ("Device API cuda is not enabled"), so the graphs
+    # — and hence the model — must run on CPU. The model is tiny (~5M params) and
+    # hhblits dominates runtime, so this is not the bottleneck.
+    trainer = pl.Trainer(accelerator="cpu", devices=1, logger=False,
                          enable_progress_bar=False, enable_checkpointing=False)
     payload = trainer.predict(model=model, dataloaders=loader)[0]
 
