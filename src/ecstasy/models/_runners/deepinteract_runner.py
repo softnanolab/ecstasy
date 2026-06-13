@@ -35,6 +35,10 @@ def _embed_block(block: np.ndarray, lenA: int, lenB: int) -> np.ndarray:
     L = lenA + lenB
     probs = np.zeros((L, L), dtype=np.float32)
     ba, bb = block.shape
+    # Block dims come from the PDB residue count; they may be SMALLER than the sequence
+    # (RESIDUE_COUNT_LIMIT truncation) but never larger — a larger block would silently
+    # write chain-A predictions into chain-B's band. Fail loudly instead.
+    assert ba <= lenA and bb <= lenB, f"block {block.shape} exceeds (lenA={lenA}, lenB={lenB})"
     probs[:ba, lenA:lenA + bb] = block
     probs[lenA:lenA + bb, :ba] = block.T
     return probs.astype(np.float16)

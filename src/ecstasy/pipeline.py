@@ -75,6 +75,8 @@ def run_predict(run: Run, limit: int | None = None, profile: bool = False,
     si, sn = 0, 1
     if shard:
         si, sn = (int(x) for x in str(shard).split("/"))
+        if not (sn > 0 and 0 <= si < sn):
+            raise ValueError(f"--shard must be 'i/N' with 0 <= i < N, got {shard!r}")
     n = 0
     for idx, entry in enumerate(run.dataset.entries()):
         if idx % sn != si:

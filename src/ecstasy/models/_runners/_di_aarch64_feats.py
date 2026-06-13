@@ -148,7 +148,9 @@ def dssp_dict_for_pdb(pdb_path: str) -> dict:
             if res.id[0] != " ":
                 continue
             maxasa = sander.get(res.resname)
-            rsa = min(res.sasa / maxasa, 1.0) if maxasa else "NA"
+            # Non-standard resname -> DEFAULT_MISSING_RSA (np.nan), which the consumer
+            # imputes; never a non-numeric string that would survive .isna() into float32.
+            rsa = min(res.sasa / maxasa, 1.0) if maxasa else float("nan")
             ss = ss3.get((chain.id.strip(), res.id[1]), "-")
             # (dssp_index, aa, SS, rel_acc, phi, psi, ...) — only [2],[3] are read.
             out[(cid, (" ", res.id[1], " "))] = (0, res.resname, ss, rsa,
