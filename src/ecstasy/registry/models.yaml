@@ -61,6 +61,26 @@ esmfold:
     r3: {num_recycles: 3, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
     r5: {num_recycles: 5, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
 
+# ESM2 supervised contact head (facebookresearch/esm contact_prediction.ipynb), adapted
+# for dimers with the same poly-G-linker multimer hack as ESMFold. ESM2 uses rotary
+# (relative) positions, so the linker length *is* the positional skip — there is no
+# separate residue_index_offset. The head emits a contact probability in [0, 1] directly
+# (no distogram, no recycles); we keep the continuous score for P@K ranking. Dedicated
+# lightweight venv: just torch + fair-esm (no openfold/esmfold stack), built by
+# scripts/install/esm2.sh. torch pinned <2.6 so fair-esm's checkpoint torch.load (which
+# omits weights_only=False) keeps working. Presets sweep model SIZE → the compute→P@K curve (analogous to the recycle sweeps).
+esm2:
+  runner: esm2_runner.py
+  env: ${ENVS_ROOT}/.venv-esm2
+  msa: none
+  default_preset: t33_650M
+  presets:
+    t6_8M:    {model_name: esm2_t6_8M_UR50D,    chain_linker_length: 25}
+    t12_35M:  {model_name: esm2_t12_35M_UR50D,  chain_linker_length: 25}
+    t30_150M: {model_name: esm2_t30_150M_UR50D, chain_linker_length: 25}
+    t33_650M: {model_name: esm2_t33_650M_UR50D, chain_linker_length: 25}
+    t36_3B:   {model_name: esm2_t36_3B_UR50D,   chain_linker_length: 25}
+
 mentos:
   runner: mentos_runner.py
   env: ${ENVS_ROOT}/.venv-mentos         # dedicated venv; mentos installed editable from /home/.../mentos

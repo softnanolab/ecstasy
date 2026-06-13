@@ -38,9 +38,19 @@ def test_unknown_dataset_raises():
 
 def test_models_registered_with_presets():
     assert set(model_names()) == {"boltz2", "boltz2_nomsa", "esmfold", "mentos",
-                                  "colabfold", "msa_pairformer",
+                                  "colabfold", "msa_pairformer", "esm2",
                                   "plmgraph_inter", "deepinteract"}
     assert presets_for("boltz2") == ["fast", "full", "r0", "r1", "r3", "r5"]
+    # esm2 sweeps model size (no recycles); presets are the fair-esm size tiers.
+    assert presets_for("esm2") == ["t12_35M", "t30_150M", "t33_650M", "t36_3B", "t6_8M"]
+
+
+def test_esm2_default_preset_and_params():
+    m = load_model("esm2")
+    assert m.preset == "t33_650M" and m.variant == "t33_650M"
+    assert m.params["model_name"] == "esm2_t33_650M_UR50D"
+    assert m.params["chain_linker_length"] == 25
+    assert m.msa == "none" and not m.needs_msa
 
 
 def test_default_preset_and_variant():
