@@ -51,4 +51,6 @@ markers = [
     "model_esmfold: esmfold predict smoke",
     "model_msa_pairformer: MSA Pairformer predict smoke",
     "model_colabfold: ColabFold (AF2) predict smoke",
+    "model_plmgraph_inter: PLMGraph-Inter predict smoke",
+    "model_deepinteract: DeepInteract predict smoke",
 ]

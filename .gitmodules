@@ -18,3 +18,9 @@
 [submodule "third_party/colabfold-local"]
 	path = third_party/colabfold-local
 	url = git@github.com:softnanolab/colabfold-local.git
+[submodule "modules/plmgraph_inter"]
+	path = modules/plmgraph_inter
+	url = https://github.com/ChengfeiYan/PLMGraph-Inter.git
+[submodule "modules/deepinteract"]
+	path = modules/deepinteract
+	url = https://github.com/BioinfoMachineLearning/DeepInteract.git

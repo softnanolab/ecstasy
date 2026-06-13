@@ -67,10 +67,20 @@ def make_run(dataset: str, model: str, preset: str | None = None,
                model=load_model(model, preset=preset, overrides=overrides, checkpoint=checkpoint))
 
 
-def run_predict(run: Run, limit: int | None = None, profile: bool = False) -> None:
+def run_predict(run: Run, limit: int | None = None, profile: bool = False,
+                shard: str | None = None) -> None:
     run.write_params()
+    # shard = "i/N": process only entries with index % N == i (for parallel jobs;
+    # combined with the contact.npz skip, shards never collide and are resumable).
+    si, sn = 0, 1
+    if shard:
+        si, sn = (int(x) for x in str(shard).split("/"))
+        if not (sn > 0 and 0 <= si < sn):
+            raise ValueError(f"--shard must be 'i/N' with 0 <= i < N, got {shard!r}")
     n = 0
-    for entry in run.dataset.entries():
+    for idx, entry in enumerate(run.dataset.entries()):
+        if idx % sn != si:
+            continue
         if limit is not None and n >= int(limit):
             break
         n += 1

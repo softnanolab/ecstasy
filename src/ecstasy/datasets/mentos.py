@@ -52,6 +52,11 @@ class MentosSquareDataset(Dataset):
     def gt_for(self, entry_id: str) -> dict:
         import torch
 
+        # GT .pt files pickle a `mentos.dataclasses.Sample`. The scoring env ships the
+        # `mentos` package (.venv-boltz / .venv-mentos both have it editable from
+        # /home/.../mentos), so torch.load resolves the class natively — no rename
+        # shim. (Lazy torch import: only a scoring env reaches here, never the
+        # torch-less orchestrator. See the mentos_package_and_venvs memory.)
         p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
         sample = torch.load(p, weights_only=False, map_location="cpu")
         # bin < contact_bin == contact; -1 (unresolved) must NOT count as contact.
