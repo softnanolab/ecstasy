@@ -80,12 +80,16 @@ def _collect(dataset: str, partial_cap: int = 0, exclude: set[str] | None = None
     for pred_dir in sorted(root.glob("*/*/predictions")):
         run_dir = pred_dir.parent
         model, variant = run_dir.parts[-2], run_dir.parts[-1]
+        if model == "mentos" and variant not in _MENTOS_LABEL:
+            continue        # show only labelled mentos variants (headline + named sweeps)
+        # Split a named recycle-sweep checkpoint into its own series so its r0..r5 ladder
+        # draws as one clean line instead of tangling with the headline mentos points.
+        if model == "mentos" and variant.startswith("s0xlqidn"):
+            model = "mentos_s0xlqidn"
         if include and model not in include:
             continue
         if exclude and model in exclude:
             continue
-        if model == "mentos" and variant not in _MENTOS_LABEL:
-            continue        # show only the headline step-90000 mentos variants
 
         flops = []
         for fp in pred_dir.glob("*/flops.json"):
@@ -225,6 +229,7 @@ _DISPLAY_NAME = {
     "boltz2_nomsa": "Boltz2 (no MSAs)",
     "esmfold": "ESMFold",
     "mentos": "MENTOS-188M",
+    "mentos_s0xlqidn": "MENTOS-150M (recycle 0→5)",
     "mentos_35m": "MENTOS-43M",
     "mentos_43m": "MENTOS-43M",
     "msa_pairformer": "MSA-Pairformer",
@@ -248,6 +253,8 @@ _MENTOS_LABEL = {
     # 188M was trained with recycling=1, so r0 is off-distribution — show only r1
     # (its trained operating point). The 43M baseline (trained at r0) comes via --extra-points.
     "a5sgd6ul_s90k": "r1",
+    # s0xlqidn = 150M recycle_0to5 run (step-55000), evaluated as a recycle ladder.
+    "s0xlqidn_r0": "r0", "s0xlqidn_r1": "r1", "s0xlqidn_r3": "r3", "s0xlqidn_r5": "r5",
 }
 
 # Friendly dataset titles (the plot title is just the dataset name).
@@ -258,7 +265,7 @@ _DATASET_TITLE = {
 
 
 def _disp_variant(model: str, variant: str) -> str:
-    if model == "mentos":
+    if model.startswith("mentos"):
         return _MENTOS_LABEL.get(variant, variant)
     if model in _R0_FULL_MODELS:
         return "r=0 full"

@@ -43,3 +43,23 @@ val_pinder_chain:   # V3 depth-2 walk, fused interface-monomer graph (98)
 val_pinder_pair:    # V4 LPA pair identity — headline               (474)
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_pair/index.parquet
+
+# FoldBench (BEAM-Labs/FoldBench) low-homology protein-interface test set, processed
+# by mentos/scripts/data_processing/process_foldbench.py into the SAME mentos_square
+# format (64-bin Cβ-Cβ square GT, contact_bin 19 == 8 Å). One shared index.parquet with
+# three split values: protein_protein (PPI), antibody_antigen, and their union. The .pt
+# ids are `<pdb>-assembly1__<c1>_<c2>`, so id[:2] still keys the data/<id[:2]>/ shards.
+_foldbench: &foldbench
+  <<: *mentos
+  index: ${MENTOS_ROOT}/foldbench/processed/index.parquet
+  gt_root: ${MENTOS_ROOT}/foldbench/processed/data
+
+foldbench_pp:       # protein-protein interfaces — PPI headline      (193)
+  <<: *foldbench
+  split: foldbench_pp
+foldbench_abag:     # antibody-antigen interfaces                    (137)
+  <<: *foldbench
+  split: foldbench_abag
+foldbench:          # union of pp + abag                             (330)
+  <<: *foldbench
+  split: foldbench
