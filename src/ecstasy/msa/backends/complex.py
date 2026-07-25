@@ -145,7 +145,8 @@ def ingest(datasets: list[str], out_dir: str | None = None) -> None:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_text(cand.read_text())
                 copied += 1
-    have = sum(1 for v in items.values() if store.path_for_pair(v["seqs"]).exists())
+    have, collapsed, _ = store.depth_report(items)
     if out_dir:
         print(f"[msa:complex] copied {copied} a3ms from {out_dir}")
-    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes")
+    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes "
+          f"({collapsed} collapsed to query-only — proximity dropped all paired hits)")

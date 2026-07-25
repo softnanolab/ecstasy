@@ -44,6 +44,30 @@ def path_for_pair(seqs) -> Path:
     return complex_dir() / f"{pair_hash(seqs)}.a3m"
 
 
+def paired_depth(a3m_path: Path) -> int:
+    """Number of sequence rows in a complex a3m (``>`` lines; excludes the ``#`` header).
+
+    Depth 1 == query only (the proximity filter dropped every paired hit — a
+    "collapsed" MSA, near-single-sequence for the model).
+    """
+    try:
+        with Path(a3m_path).open() as f:
+            return sum(1 for line in f if line.startswith(">"))
+    except OSError:
+        return 0
+
+
+def depth_report(items) -> tuple[int, int, list[int]]:
+    """(present, collapsed, depths) over complexes: collapsed == depth <= 1 (query only)."""
+    depths = []
+    for v in items.values():
+        p = path_for_pair(v["seqs"])
+        if p.exists():
+            depths.append(paired_depth(p))
+    collapsed = sum(1 for d in depths if d <= 1)
+    return len(depths), collapsed, depths
+
+
 def boltz_csv_complex_dir(seqs) -> Path:
     """Per-complex dir holding one ``<chain_index>.csv`` per chain (pairing-aware)."""
     return boltz_csv_dir() / pair_hash(seqs)

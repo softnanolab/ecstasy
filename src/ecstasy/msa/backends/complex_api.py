@@ -6,8 +6,8 @@ This API path is kept as a network fallback / cross-check only. See ``msa/README
 for the model→pipeline map and why the two must not be conflated.
 
 Reproduces the MSA Pairformer notebook/SI MMseqs2 route over the network (separate from boltz_csv):
-  heterodimer -> /ticket/pair paircomplete-pairfilterprox_20 -> save_msa filters
-                 (coverage>=0.75, query-identity>=0.30, genomic-distance<=20) -> stitch
+  heterodimer -> /ticket/pair paircomplete-pairfilterprox_20 (fetch broad) -> save_msa
+                 filters (coverage>=0.70, query-identity>=0.15, genomic-distance<=1) -> stitch
   homodimer   -> /ticket/msa unpaired -> tile each row (s|s)
 Writes one ``#L1,L2\\t1,1``-headed a3m per complex to the store; the depth cap (512,
 hhfilter) happens at model load in the runner. Needs network egress to
@@ -116,5 +116,6 @@ def submit(datasets: list[str]) -> None:
 def ingest(datasets: list[str], out_dir: str | None = None) -> None:
     """Report store coverage (the fetch in `submit` writes straight to the store)."""
     items = collect_complexes(datasets)
-    have = sum(1 for v in items.values() if store.path_for_pair(v["seqs"]).exists())
-    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes")
+    have, collapsed, _ = store.depth_report(items)
+    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes "
+          f"({collapsed} collapsed to query-only — proximity dropped all paired hits)")
