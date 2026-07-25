@@ -78,9 +78,9 @@ def prepare(datasets: list[str]) -> Path:
     with fasta.open("w") as f:
         for h, v in sorted(missing.items()):
             f.write(f">{v['header']}\n{v['query']}\n")
-    print(f"[msa:complex] datasets={datasets}")
-    print(f"[msa:complex] unique={len(items)} already_in_store={len(items)-len(missing)} missing={len(missing)}")
-    print(f"[msa:complex] wrote {fasta}; run --phase submit to fetch from api.colabfold.com (needs network)")
+    print(f"[msa:complex_api] datasets={datasets}")
+    print(f"[msa:complex_api] unique={len(items)} already_in_store={len(items)-len(missing)} missing={len(missing)}")
+    print(f"[msa:complex_api] wrote {fasta}; run --phase submit to fetch from api.colabfold.com (needs network)")
     return fasta
 
 
@@ -95,7 +95,7 @@ def submit(datasets: list[str]) -> None:
     items = collect_complexes(datasets)
     store.complex_dir().mkdir(parents=True, exist_ok=True)
     missing = [v for v in items.values() if not store.path_for_pair(v["seqs"]).exists()]
-    print(f"[msa:complex] fetching {len(missing)} of {len(items)} complexes "
+    print(f"[msa:complex_api] fetching {len(missing)} of {len(items)} complexes "
           f"from api.colabfold.com ({workers} workers)", flush=True)
     done = errors = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -107,15 +107,15 @@ def submit(datasets: list[str]) -> None:
                     done += 1
             except Exception as e:  # noqa: BLE001
                 errors += 1
-                print(f"[msa:complex] ERROR {h}: {e}", file=sys.stderr, flush=True)
+                print(f"[msa:complex_api] ERROR {h}: {e}", file=sys.stderr, flush=True)
             if n % 25 == 0 or n == len(missing):
-                print(f"[msa:complex] {n}/{len(missing)} (done={done} errors={errors})", flush=True)
-    print(f"[msa:complex] done: wrote={done} errors={errors}")
+                print(f"[msa:complex_api] {n}/{len(missing)} (done={done} errors={errors})", flush=True)
+    print(f"[msa:complex_api] done: wrote={done} errors={errors}")
 
 
 def ingest(datasets: list[str], out_dir: str | None = None) -> None:
     """Report store coverage (the fetch in `submit` writes straight to the store)."""
     items = collect_complexes(datasets)
     have, collapsed, _ = store.depth_report(items)
-    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes "
+    print(f"[msa:complex_api] store coverage: {have}/{len(items)} complexes "
           f"({collapsed} collapsed to query-only — proximity dropped all paired hits)")

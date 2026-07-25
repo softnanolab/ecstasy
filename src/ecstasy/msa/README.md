@@ -47,22 +47,23 @@ model load (`msa_pairformer_runner.py`).
 - **Single source of the method, two implementations:** `complex_api` uses
   `msa/colabfold.py::apply_save_msa_filters` (reads the server's per-hit
   coverage/identity metadata); `complex` (local) uses the colabfold-local submodule's
-  `proximity.py` (computes coverage/identity from the alignment, since local
-  `colabfold_search` output has no server metadata header). `tests/test_proximity_parity.py`
+  `proximity.py` (derives coverage/identity from the alignment so as to *reproduce*
+  the server's definitions — local `colabfold_search` output carries no metadata
+  header). `tests/test_proximity_parity.py`
   feeds an identical fixture to both and asserts identical filter+stitch output, so they
   cannot drift.
-- **Known parity gap in the coverage/identity *derivation*:** `complex_api` reads the
-  server's span-based coverage `(qend-qstart+1)/qlen` and `fident`; the local path
-  computes coverage as non-gap/qlen and identity over comparable columns. For a hit
-  with internal gaps these differ by the gap fraction, so a row sitting right at the
-  0.70/0.15 threshold can be **kept by the API path but dropped locally** (or vice
-  versa). The filter/encode/stitch logic is identical (proven by
-  `test_proximity_parity.py`); only the metadata *derivation* differs. **True parity
-  requires unifying the derivation** — the recommended fix is to compute coverage/
-  identity from the alignment on *both* sides (the server `pair.a3m` rows carry the
-  aligned sequence, and this is what the upstream notebook does), which also lets the
-  shared core live in one place. Tracked as a pre-merge follow-up. `tests/integration/`
-  cross-checks the real local-vs-API paired set where DBs + network are available.
+- **Coverage/identity derivation is now server-equivalent (was a real parity gap).**
+  `complex_api` reads the server's span coverage `(qend-qstart+1)/qlen` and `fident`.
+  The local path previously computed coverage as non-gap/qlen and identity over
+  comparable columns, so a hit with internal gaps scored *lower* locally by the
+  internal-gap fraction — at `min_coverage=0.70` the local path silently dropped rows
+  the API keeps, biasing local MSAs shallower (and depth is what this benchmark
+  correlates against). Fixed in the **local** direction, not the notebook direction:
+  `proximity._coverage_vs_query` now measures the aligned span and
+  `_identity_vs_query` divides by alignment length to mirror mmseqs `fident`. Upstream
+  is server/metadata-based, so the API path is the faithful one to converge on.
+  `tests/integration/` cross-checks the real local-vs-API paired set where DBs +
+  network are available.
 - Previously `complex_api` used the wider `prox_20 / id 0.30 / cov 0.75` and `complex`
   applied **no** proximity filter at all (it ingested the raw `colabfold_search` a3m) —
   both superseded by the above.
@@ -92,7 +93,7 @@ Store layout: `$DATA_ROOT/msa_store/{boltz_csv,complex,...}/` keyed by hash.
 ## colabfold-local dependency (the `complex` route)
 
 - Repo: `git@github.com:softnanolab/colabfold-local.git`
-- **Pinned commit: `078422c`** ("proximity save_msa post-processing for local paired MSAs";
+- **Pinned commit: `1817916`** ("proximity save_msa post-processing for local paired MSAs";
   colabfold-local PR #1). Bump to the merge commit once that PR lands.
 - Vendored as the git submodule `third_party/colabfold-local`. Override with
   `COLABFOLD_LOCAL_DIR` (checkout) and `COLABFOLD_LOCAL_VENV` (its venv) if installed
