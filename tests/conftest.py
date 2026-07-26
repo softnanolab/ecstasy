@@ -17,6 +17,11 @@ from typing import Iterable
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Import ecstasy from THIS checkout. The editable install resolves to the primary
+# checkout, so in a git worktree the suite would silently exercise the other tree's
+# code -- e.g. reporting AttributeError for functions this branch adds.
+sys.path.insert(0, str(REPO_ROOT / "src"))
 VENVS: dict[str, Path] = {
     "ecstasy":   REPO_ROOT / "envs" / ".venv-ecstasy",
     "boltz":     REPO_ROOT / "envs" / ".venv-boltz",
