@@ -93,7 +93,7 @@ Store layout: `$DATA_ROOT/msa_store/{boltz_csv,complex,...}/` keyed by hash.
 ## colabfold-local dependency (the `complex` route)
 
 - Repo: `git@github.com:softnanolab/colabfold-local.git`
-- **Pinned commit: `1817916`** ("proximity save_msa post-processing for local paired MSAs";
+- **Pinned commit: `3e4109d`** ("proximity save_msa post-processing for local paired MSAs";
   colabfold-local PR #1). Bump to the merge commit once that PR lands.
 - Vendored as the git submodule `third_party/colabfold-local`. Override with
   `COLABFOLD_LOCAL_DIR` (checkout) and `COLABFOLD_LOCAL_VENV` (its venv) if installed
