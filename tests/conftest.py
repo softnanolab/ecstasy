@@ -27,7 +27,7 @@ VENVS: dict[str, Path] = {
 }
 
 # Default smoke dataset (small, single-sequence fallback works without MSAs).
-SMOKE_DATASET = "mentos_seqid30"
+SMOKE_DATASET = "recent_pp"
 
 
 @pytest.fixture(scope="session")

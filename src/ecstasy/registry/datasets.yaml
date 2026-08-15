@@ -14,32 +14,39 @@ _mentos: &mentos
   # interchain P@K/AUC are directly comparable to the MENTOS benchmark. bin<5 was a
   # far stricter, non-comparable GT (degenerate median P@K=0). Verified identical to
   # mentos.metrics.contact_prediction.metrics_inter_chain at bin 19.
+  # The GT contact_map is 64 bins over 2.0–22.0 Å (width 0.3125 Å, -1 = unresolved),
+  # so bin<19 is exactly 2.0 + 19*0.3125 = 7.9375 Å.
   contact_bin: 19
 
-# MENTOS seq_id_30 val (legacy headline; 1,511 dimers)
-mentos_seqid30:
+# MENTOS "recent-PP" val — the ONLY split MENTOS still ships (PR #266). It replaced the
+# five earlier splits (seq_id_30 + the four deleaked val_* sets), whose parquets no
+# longer exist under MENTOS_ROOT; those rows were removed rather than left dangling.
+#
+# 151 dimers, all 2-chain, 104–1006 residues (median 618). The index also carries the
+# 23,463 PDB-train rows, so `split: val` is load-bearing.
+#
+# Built to replicate §A.2.10 "Comparison with Boltz-2" of the ESMFold2 paper (Candido
+# et al. 2026, doi:10.64898/2026.06.03.729735) — verified constant-by-constant against
+# splits/val/build_manifest.json:
+#   * PDB released 2025-06-30 → 2026-01-21   (VAL_DATE_LOWER / VAL_DATE_UPPER)
+#   * chains < 40 or complexes > 2048 res dropped (MIN_RESIDUES_PER_CHAIN / MAX_RESIDUES_VAL)
+#   * MMseqs cluster @ 40% id, 0.8 cov, cov_mode 0 against PDB-train (DECONTAM_*)
+#   * any val chain clustering with a train chain removes the WHOLE val complex
+#     (mentos.data_processing.splits.recent_pp.leaked_val_ids)
+# Boltz-2 trains on PDB pre-2023-06-01 (= SPLIT_DATE_CUTOFF), so this window is
+# genuinely temporally held out for Boltz-2, ESMFold and ESM2 alike.
+#
+# Caveat when reporting: the paper's numbers on this dataset are DockQ pass rates over
+# predicted 3D structures; ecstasy measures inter-chain P@K over a contact map. Only the
+# dataset is shared — the figures are not comparable, only the relative ordering.
+#
+# dataset_version (sha256 of index.parquet): 4d504b7e91f5babc76dfefb98e2b4732ca25216eb4aa767224e0dd1a9d506fe0
+recent_pp:
   <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/seq_id_30/index.parquet
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val/index.parquet
 
-# Four leakage-controlled val splits (deleaking strategy in the comment)
-val_seq_chain:      # V1 MMseqs cluster @ 30% seq id, chain-level   (631)
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_chain/index.parquet
-val_seq_pair:       # V2 MMseqs cluster, pair identity              (945)
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
-
-# Chain-order-permutation experiment: val_seq_pair with each dimer's chains flipped
-# (A,B)->(B,A), GT reindexed to match. ISOLATED (own run dir + own pair-hash MSAs, so
-# MSAs get recalculated from scratch for the flipped order). Tests model order-dependence.
-val_seq_pair_swapped:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
-  swap_chains: true
-
-val_pinder_chain:   # V3 depth-2 walk, fused interface-monomer graph (98)
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_chain/index.parquet
-val_pinder_pair:    # V4 LPA pair identity — headline               (474)
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_pair/index.parquet
+# `swap_chains: true` (chain-order permutation: (A,B)->(B,A) with the square GT
+# reindexed to match) is still implemented by MentosSquareDataset — the old
+# val_seq_pair_swapped row went away with its parquet, not the capability. A swapped
+# row must have its OWN name: it needs its own run dir, and MSA store keys are
+# order-dependent (pair_hash), so its MSAs regenerate from scratch.

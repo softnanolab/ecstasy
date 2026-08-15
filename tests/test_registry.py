@@ -18,16 +18,16 @@ def test_var_resolution():
 
 
 def test_datasets_registered():
-    names = dataset_names()
-    for n in ("mentos_seqid30", "val_seq_chain", "val_seq_pair",
-              "val_pinder_chain", "val_pinder_pair"):
-        assert n in names
+    # recent_pp is the only split MENTOS still ships; the five earlier splits were
+    # removed from the registry when their parquets disappeared from MENTOS_ROOT.
+    assert dataset_names() == ["recent_pp"]
 
 
 def test_dataset_loads_and_resolves_paths():
-    d = load_dataset("val_pinder_pair")
-    assert d.name == "val_pinder_pair"
-    assert "${" not in str(d.index) and str(d.index).endswith("val_pinder_pair/index.parquet")
+    d = load_dataset("recent_pp")
+    assert d.name == "recent_pp"
+    assert "${" not in str(d.index) and str(d.index).endswith("splits/val/index.parquet")
+    assert d.split == "val"          # the index also holds 23,463 train rows
     assert d.contact_bin == 19
 
 
@@ -105,11 +105,14 @@ def test_msa_backends_registered():
 
 
 def test_experiment_expands_matrix():
-    m = {"name": "t", "datasets": ["val_seq_chain", "val_pinder_pair"],
+    # Only one dataset is registered now, so the matrix is exercised along the runs axis.
+    m = {"name": "t", "datasets": ["recent_pp"],
          "runs": [{"model": "boltz2", "preset": "full"},
-                  {"model": "boltz2", "preset": "full", "set": {"recycling_steps": 5}}]}
+                  {"model": "boltz2", "preset": "full", "set": {"recycling_steps": 5}},
+                  {"model": "esmfold", "preset": "r1"}]}
     runs = experiment.expand(m)
-    assert len(runs) == 4                       # 2 datasets × 2 run specs
-    variants = {(r.dataset.name, r.model.variant) for r in runs}
-    assert ("val_seq_chain", "full") in variants
-    assert any(v.startswith("full+") for _, v in variants)
+    assert len(runs) == 3                       # 1 dataset × 3 run specs
+    variants = {(r.dataset.name, r.model.name, r.model.variant) for r in runs}
+    assert ("recent_pp", "boltz2", "full") in variants
+    assert ("recent_pp", "esmfold", "r1") in variants
+    assert any(v.startswith("full+") for _, _, v in variants)

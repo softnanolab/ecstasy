@@ -38,30 +38,52 @@ $DATA_ROOT/ecstasy/runs/<dataset>/<model>/<variant>/
 overrides are given. Infra knobs (num_workers/devices) are *not* part of the
 variant, so machine tweaks never fork a run dir or trigger a re-run.
 
-## Boltz-2 on the four val splits (the headline run)
+## Datasets
 
-Boltz-2 needs **per-chain unpaired** MSAs (shared store, keyed by sequence hash,
-so the four splits never regenerate overlapping chains — 1,327 unique total).
+`recent_pp` is the **only** registered dataset. MENTOS now ships one split
+(`pdb/processed/splits/val/`), which replaced `seq_id_30` and the four deleaked
+`val_*` sets — their parquets no longer exist, so those rows were removed rather
+than left dangling. See the header comment in `registry/datasets.yaml` for the
+provenance (it replicates §A.2.10 of the ESMFold2 paper) and for why the paper's
+DockQ pass rates are *not* comparable to our inter-chain P@K.
+
+## Running the driver
+
+The per-model runners are subprocessed into their own venvs by
+`models/adapter.py`, so the driver env only needs `ecstasy` + `torch` + `mentos`
+(scoring unpickles a `mentos.dataclasses.Sample`). **The editable installs of
+`ecstasy` and `mentos` are broken in every venv on this machine** — they point at
+a deleted worktree — so put both source trees on `PYTHONPATH` and invoke
+`python -m ecstasy.cli` rather than the `ecstasy` console script:
 
 ```bash
-cd <repo>; source envs/.venv-boltz/bin/activate      # has ecstasy + torch + mentos
+export PYTHONPATH=<mentos-checkout>/src:<ecstasy-checkout>/src
+PY=$ENVS_ROOT/.venv-mentos/bin/python                 # torch 2.12, pandas, fire, yaml
 
-# 1. MSAs: write the missing-chains FASTA, run colabfold-local, ingest into the store
-ecstasy msa --datasets val_seq_chain,val_seq_pair,val_pinder_chain,val_pinder_pair --kind per_chain --phase submit
-#   (or run the printed sbatch yourself, then:)
-ecstasy msa --datasets val_seq_chain,val_seq_pair,val_pinder_chain,val_pinder_pair --kind per_chain --phase ingest
-
-# 2. Smoke one entry end-to-end, then the full sweep
-ecstasy run --dataset val_pinder_pair --model boltz2 --limit 1
-sbatch scripts/run_experiment.sbatch experiments/boltz2_val_splits.yaml
-
-# 3. Table
-ecstasy compare --dataset val_pinder_pair
+$PY -m ecstasy.cli list
 ```
 
-Scoring loads the MENTOS-pickled GT, so run `score`/`run` from an env with
-`torch` + `mentos` (`.venv-boltz` has both; `.venv-esmfold` needs
-`pip install -e /home/u6jv/harsh.u6jv/mentos` for the no-MSA models).
+## ESMFold + single-sequence Boltz-2 on recent_pp (the headline run)
+
+Both models are MSA-free, so there is no MSA phase at all.
+
+```bash
+# 1. Smoke one entry per model — gate on a non-degenerate P@K and a contact.npz
+#    of shape len(chainA)+len(chainB). A shape mismatch is reported as `_error`
+#    in result.json rather than raised, so check it before burning GPU hours.
+$PY -m ecstasy.cli run --dataset recent_pp --model esmfold      --limit 1
+$PY -m ecstasy.cli run --dataset recent_pp --model boltz2_nomsa --limit 1
+
+# 2. The recycle ladders, with FLOPs (8 runs x 151 dimers)
+sbatch scripts/run_experiment.sbatch experiments/recent_pp_nomsa_ladder.yaml --profile
+
+# 3. Table
+$PY -m ecstasy.cli compare --dataset recent_pp
+```
+
+`--profile` is what produces the FLOPs axis, and it must be passed to
+`experiment` too, not just `run` — FLOPs are length-dependent, so measurements
+from the old splits do not transfer to this one.
 
 ## Notes
 
@@ -70,4 +92,7 @@ Scoring loads the MENTOS-pickled GT, so run `score`/`run` from an env with
   `ecstasy/runs/`. Re-run, or symlink if you want to keep them.
 - Other models reuse the same flow: `esmfold`/`mentos` are single-sequence;
   `msa_pairformer` needs `--kind complex` MSAs (paired), not the per-chain ones.
-```
+- The chain-order-permutation experiment (`swap_chains: true`) is still supported
+  by `MentosSquareDataset`; only the old `val_seq_pair_swapped` *row* went away
+  with its parquet. Add a swapped row for `recent_pp` if you want it back — give
+  it its own name, since it needs its own run dir and pair-hash MSAs.

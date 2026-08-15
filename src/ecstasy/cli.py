@@ -94,9 +94,14 @@ class Ecstasy:
         """Aggregate all runs for a dataset into comparison.{csv,md}."""
         pipeline.run_compare(dataset)
 
-    def experiment(self, manifest, limit=None, no_score=False):
-        """Run a dataset×model sweep from a manifest YAML."""
-        experiment.run_experiment(manifest, limit=limit, score=not no_score)
+    def experiment(self, manifest, limit=None, no_score=False, profile=False):
+        """Run a dataset×model sweep from a manifest YAML.
+
+        --profile measures inference FLOPs for every run in the sweep (same meaning as
+        `run --profile`); the sbatch wrapper goes through here, so without it a
+        cluster-submitted sweep produces P@K but no FLOPs axis.
+        """
+        experiment.run_experiment(manifest, limit=limit, score=not no_score, profile=profile)
 
 
 def main():

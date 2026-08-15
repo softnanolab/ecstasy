@@ -20,11 +20,15 @@ Every script (and CLI call) needs the package on `PYTHONPATH` and the data-root 
 vars resolved by `ecstasy.config.settings`. Run with the project venv:
 
 ```bash
-export PYTHONPATH=src                # plots resolve _plotstyle from their own dir
+# The editable installs of `ecstasy` and `mentos` are broken in every venv on this
+# machine (they point at a deleted worktree), so BOTH source trees go on PYTHONPATH and
+# you invoke `python -m ecstasy.cli`, never the `ecstasy` console script. `mentos` is
+# needed because scoring unpickles a `mentos.dataclasses.Sample`.
+export PYTHONPATH=src:<mentos-checkout>/src   # plots resolve _plotstyle from their own dir
 export DATA_ROOT=…   MENTOS_ROOT=…   ECSTASY_ROOT=…   ENVS_ROOT=…   TOOLS_ROOT=…
 export COLABFOLD_DBS=…            # local ColabFold DBs (MSA generation)
 export LOGS_DIR=…                 # W&B run files (mentos config lookup)
-PYB="$ENVS_ROOT/.venv-boltz/bin/python"   # 3.12; has ecstasy + matplotlib
+PYB="$ENVS_ROOT/.venv-mentos/bin/python"  # 3.12; torch 2.12 + pandas + fire + yaml
 ```
 
 Paths come from `settings()` (e.g. `settings().runs_root`), never hardcoded. CMU
@@ -39,7 +43,7 @@ gitignored local cache once (re-run whenever the Registry changes), then select 
 
 ```bash
 $PYB scripts/mentos-perf-benchmarking/notion_pull.py        # writes registry.local.yaml (gitignored)
-$PYB -m ecstasy.cli run --dataset val_seq_pair --model mentos --checkpoint a5sgd6ul_s90k --profile
+$PYB -m ecstasy.cli run --dataset recent_pp --model mentos --checkpoint a5sgd6ul_s90k --profile
 ```
 
 `mentos_ckpt_sweep.py` and `distogram_evolution.py` likewise take `--checkpoint <name>` and
@@ -51,9 +55,9 @@ All scripts live in `scripts/mentos-perf-benchmarking/` (abbreviated `MPB/` belo
 
 | Script | Example |
 |---|---|
-| `MPB/plot_pak_vs_flops.py` | `$PYB scripts/mentos-perf-benchmarking/plot_pak_vs_flops.py --dataset val_seq_pair [--annotate-r0] [--exclude-models boltz2_nomsa]` |
-| `MPB/plot_flops_vs_length.py` | `$PYB scripts/mentos-perf-benchmarking/plot_flops_vs_length.py --dataset val_seq_chain --model esmfold --presets r0,r1,r3,r5 [--style line]` |
-| `MPB/plot_pak_vs_interface.py` | `$PYB scripts/mentos-perf-benchmarking/plot_pak_vs_interface.py --dataset val_seq_pair --xmode {contacts,percent} --cap 800` |
+| `MPB/plot_pak_vs_flops.py` | `$PYB scripts/mentos-perf-benchmarking/plot_pak_vs_flops.py --dataset recent_pp [--annotate-r0] [--exclude-models boltz2_nomsa]` |
+| `MPB/plot_flops_vs_length.py` | `$PYB scripts/mentos-perf-benchmarking/plot_flops_vs_length.py --dataset recent_pp --model esmfold --presets r0,r1,r3,r5 [--style line]` |
+| `MPB/plot_pak_vs_interface.py` | `$PYB scripts/mentos-perf-benchmarking/plot_pak_vs_interface.py --dataset recent_pp --xmode {contacts,percent} --cap 800` |
 | `MPB/plot_pak_vs_msadepth.py` | `$PYB scripts/mentos-perf-benchmarking/plot_pak_vs_msadepth.py --depth {paired,total}` |
 | `MPB/plot_swap_flops.py` | `$PYB scripts/mentos-perf-benchmarking/plot_swap_flops.py` (original vs swapped overlay) |
 | `MPB/swap_compare.py` | `$PYB scripts/mentos-perf-benchmarking/swap_compare.py` (ΔP@K table + scatters, orig vs swapped) |
@@ -66,7 +70,7 @@ All scripts live in `scripts/mentos-perf-benchmarking/` (abbreviated `MPB/` belo
 `flops.json` sidecars, then it auto-scores P@K:
 
 ```bash
-for split in val_seq_chain val_seq_pair val_pinder_chain val_pinder_pair; do
+for split in recent_pp; do            # recent_pp is the only registered split now
   for preset in r0 r1 r3 r5; do
     $PYB -m ecstasy.cli run --dataset $split --model boltz2       --preset $preset --profile
     $PYB -m ecstasy.cli run --dataset $split --model boltz2_nomsa --preset $preset --profile
@@ -80,8 +84,11 @@ $PYB -m ecstasy.cli run --dataset $split --model msa_pairformer --preset full   
 (In practice each `(split, model, preset)` cell is one SLURM array task — see the
 template below.)
 
-**Chain-order (swap) experiment** — isolated under the `val_seq_pair_swapped` dataset
-(chains flipped + GT reindexed; registered in `registry/datasets.yaml`):
+**Chain-order (swap) experiment** — NOT currently registered. `swap_chains: true` is
+still implemented by `MentosSquareDataset`, but the `val_seq_pair_swapped` row went away
+with its parquet. To run it again, add a swapped row for `recent_pp` under its own name
+(it needs its own run dir, and pair-hash MSA keys are order-dependent), then substitute
+that name below:
 
 ```bash
 # 1. regenerate Boltz MSAs from scratch for the flipped order (new pair-hashes)
@@ -110,12 +117,13 @@ Generate a wrapper locally; resolve paths from the submit dir, don't hardcode th
 #!/bin/bash
 #SBATCH --job-name=ecstasy --gpus-per-node=1 --ntasks-per-node=1 --time=24:00:00
 #SBATCH --array=0-15%16
+#SBATCH --partition=gpu --qos=freegpu      # no `workq` on this cluster
 set -uo pipefail
 WT="${SLURM_SUBMIT_DIR:?}"                 # repo root — not a hardcoded path
-export PYTHONPATH="$WT/src"
+export PYTHONPATH="$WT/src:<mentos-checkout>/src"
 export DATA_ROOT=…  MENTOS_ROOT=…  ECSTASY_ROOT=…  ENVS_ROOT=…  TOOLS_ROOT=…  COLABFOLD_DBS=…  LOGS_DIR=…
-PYB="$ENVS_ROOT/.venv-boltz/bin/python"
-CELLS=( "val_seq_pair boltz2 r0" "val_seq_pair boltz2 r1" … )   # one (split model preset) per index
+PYB="$ENVS_ROOT/.venv-mentos/bin/python"
+CELLS=( "recent_pp boltz2 r0" "recent_pp boltz2 r1" … )   # one (split model preset) per index
 read -r split model preset <<< "${CELLS[$SLURM_ARRAY_TASK_ID]}"
 $PYB -m ecstasy.cli run --dataset "$split" --model "$model" --preset "$preset" --profile
 ```

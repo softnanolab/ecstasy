@@ -1,10 +1,10 @@
 """Experiment manifests: a recorded dataset×model sweep.
 
 ```yaml
-name: boltz2_val_splits
-datasets: [val_seq_chain, val_seq_pair, val_pinder_chain, val_pinder_pair]
+name: recent_pp_nomsa_ladder
+datasets: [recent_pp]
 runs:
-  - {model: boltz2, preset: full}
+  - {model: esmfold, preset: r1}
   - {model: boltz2, preset: full, set: {recycling_steps: 5}}   # per-cell override
 ```
 
@@ -40,7 +40,8 @@ def expand(manifest: dict) -> list[Run]:
     return runs
 
 
-def run_experiment(path: str, limit: int | None = None, score: bool = True) -> None:
+def run_experiment(path: str, limit: int | None = None, score: bool = True,
+                   profile: bool = False) -> None:
     manifest = load_manifest(path)
     runs = expand(manifest)
     print(f"experiment {manifest.get('name', Path(path).stem)}: {len(runs)} run(s)")
@@ -51,6 +52,6 @@ def run_experiment(path: str, limit: int | None = None, score: bool = True) -> N
         return
     for r in runs:
         print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} ===")
-        run_predict(r, limit=limit)
+        run_predict(r, limit=limit, profile=profile)
         if score:
             run_score(r, limit=limit)
