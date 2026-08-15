@@ -12,8 +12,16 @@
 #   sbatch scripts/run_experiment.sbatch experiments/recent_pp_nomsa_ladder.yaml --profile
 #
 # Partition/QOS: this cluster has cpu|highmem|hbm|gpu|intergpu (there is no `workq`).
-# `gpu` + `freegpu` gives a 2-day wall; `intergpu` is 6h at higher priority. Check with
+# For a BATCH gpu job, `gpu` + `freegpu` is the only accepted combination — submitting to
+# `intergpu` is rejected outright ("only partition gpu with the qos freegpu is valid for a
+# batch gpu job"); despite its higher QOS priority it is reserved for interactive
+# salloc/srun. Check your associations with
 #   sacctmgr -nP show assoc user=$USER format=Account,Partition,QOS
+#
+# The gpu partition is heavily contested (routinely 20+ running, 40+ pending), and
+# `freegpu` is low priority, so walltime is the practical scheduling lever: a short
+# --time backfills into gaps that a 24h request cannot. Request what the sweep actually
+# needs rather than the 24h default below when you can bound it.
 #
 # Driver env: the per-model runners are subprocessed into their own venvs by
 # models/adapter.py, so this env only has to import ecstasy + torch + mentos (scoring
