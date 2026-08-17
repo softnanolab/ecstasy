@@ -41,7 +41,18 @@
 # so both source trees go on PYTHONPATH and we invoke `python -m ecstasy.cli` rather than
 # the `ecstasy` console script (which does not exist there either).
 set -euo pipefail
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Do NOT derive REPO_ROOT from ${BASH_SOURCE[0]}: sbatch copies this file to a spool dir
+# and runs the copy, so under SLURM that resolves to /var/spool/slurm/d and every path
+# below lands outside the repo (job 62930 died at 0:00 on `mkdir /var/spool/slurm/d/logs:
+# Permission denied`). SLURM_SUBMIT_DIR is the directory sbatch was invoked from, which
+# is the repo root; the BASH_SOURCE form is kept only as the non-SLURM fallback for
+# running this script directly. ECSTASY_REPO_ROOT overrides both.
+REPO_ROOT="${ECSTASY_REPO_ROOT:-${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+if [[ ! -d "${REPO_ROOT}/src/ecstasy" ]]; then
+  echo "ERROR: REPO_ROOT=${REPO_ROOT} has no src/ecstasy — submit from the repo root," \
+       "or set ECSTASY_REPO_ROOT." >&2
+  exit 2
+fi
 mkdir -p "${REPO_ROOT}/logs"
 
 # Filesystem roots come from the repo-root .env (env > .env). A git worktree has no
