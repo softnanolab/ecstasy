@@ -5,11 +5,22 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
 #SBATCH --time=24:00:00
 #SBATCH --partition=gpu
 #SBATCH --qos=freegpu
 # Generic experiment runner. Usage:
 #   sbatch scripts/run_experiment.sbatch experiments/recent_pp_nomsa_ladder.yaml --profile
+#
+# --mem is NOT optional. This cluster defaults to ~1G per CPU, and ESMFold silently
+# livelocks under that: loading it needs the 2.7G esmfold_3B_v1 state dict plus the 5.6G
+# esm2_t36_3B_UR50D one, then materialises ~3.5B fp32 params on the CPU before .to(cuda)
+# — a ~25-30G peak. Against a small cgroup limit the loader does not get OOM-killed, it
+# just thrashes page-cache reclaim forever: job 62424 sat at MaxRSS 8.07G/8G for its full
+# 45min walltime and never got past `esm.pretrained.esmfold_v1()`. Diagnose this with
+#   sacct -j <id> --format=JobID,ReqMem,MaxRSS,State
+# (MaxRSS pinned at ReqMem == starved, not hung). GPU nodes have 960G across 64 cores, so
+# 64G is well inside a fair share and costs nothing in scheduling priority.
 #
 # Partition/QOS: this cluster has cpu|highmem|hbm|gpu|intergpu (there is no `workq`).
 # For a BATCH gpu job, `gpu` + `freegpu` is the only accepted combination — submitting to
