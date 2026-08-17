@@ -81,6 +81,32 @@ mode (proof that diffusion was skipped).
 | 8 | Extract the (ii) count | **Per-model, per §3.5.** Boltz: profile the **skip-structure** forward (diffusion simply does not run → no attribution needed). ESMFold/MENTOS/MSA-Pairformer: wrap the contact-producing call in `FlopCounterMode`; for ESMFold use the per-module breakdown only to subtract the two terminal heads (`lddt_head`,`ptm_head`). |
 | 8b | In-process requirement | **We may edit the softnano forks** (user-confirmed). So Boltz gets a `--profile_flops` flag added to **its own predict CLI** (sets `skip_run_structure=True`, wraps the forward in `FlopCounterMode`, dumps `flops.json` into the boltz out dir) — reusing boltz's real featurization instead of reimplementing it. The ecstasy boltz_runner keeps shelling out, now passing `--profile_flops`. MENTOS/ESMFold/MSA-Pairformer already run in-process in their runners → wrap inline. |
 | 8c | Free correctness check | Trunk FLOPs must be **affine in recycles**: `base + k·per_recycle`. Fit {0,1,3,5}; non-clean fit ⇒ wrong module attribution. Intercept (k=0 single pass) must match a hand `~2·params·L` order bound. Record the contact-dependency module-name set as an **asserted list** so a future refactor that renames modules fails loudly. |
+| 4d | Counter backend | **Two, because the model venvs do not share a torch version.** `FlopCounterMode` (torch ≥ 2.1) for `.venv-boltz` / `.venv-mentos`; `torch.profiler(with_flops=True)` (torch ≥ 1.8) for `.venv-esmfold`, pinned to py3.7 / torch 1.12 because openfold's `structure_module` imports a cp37 CUDA extension **at module import time** — moving that env to py3.12 would mean rebuilding CUDA 11.3-era kernels against 12.4. The two are comparable: both charge 2·MACs over the same matmul family (mm/addmm/bmm/baddbmm/conv) and ignore elementwise work. Verified on torch 1.12.1 that the profiler returns exactly `2·m·k·n` for a Linear (two shapes) and that `key_averages()` **sums** over repeated calls rather than averaging — the latter is what makes the count scale with recycles. Each sidecar records which backend produced it. |
+
+### 2.1 Status of check 8c (2026-08-17)
+
+Check 8c **fired on its first real use, and it was right.** Boltz-2 reported an identical
+`2.929e9` for every rung of the r0/r1/r3/r5 ladder — slope zero, the most degenerate
+possible violation of "affine in recycles" — while P@K moved 0.053 → 0.348 → 0.462 →
+0.492 over the same rungs, so the trunk was demonstrably running and recycling.
+
+The magnitude is wrong too: ~2.9 GFLOP for an L=689 trunk is 3–4 orders of magnitude
+below the `~L³·c` order bound the same decision calls for. The counted total is *exactly*
+`input_embedder + confidence_module`; every module between them — including plain
+`Linear` children such as `s_init`, `z_init_1/2` and `distogram_module`, which must run
+because `pdistogram` depends on them — contributes zero. So this is not mis-attribution
+(`get_total_flops()` is a global sum, independent of module naming): the dispatch mode
+stops observing ops partway through the forward.
+
+Ruled out so far: `torch.compile` (inference unwraps to `._orig_mod`, so the trunk is
+eager), custom kernels (`no_kernels=True` ⇒ `use_kernels=False`), `no_grad`
+(`input_embedder` is under the same `set_grad_enabled` block and *is* counted), and the
+trunk not running at all. `FlopCounterMode` itself is exact on a plain `Linear` in that
+same venv. Diagnosis continues under `ECSTASY_FLOPS_DEBUG=1`, which dumps the unfiltered
+attribution, the aten ops actually observed, and a `pdistogram` checksum.
+
+**No Boltz-2 FLOPs number should be published until this resolves.** The invalid sidecars
+have been deleted rather than left on disk.
 
 ---
 
