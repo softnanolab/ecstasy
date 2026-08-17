@@ -85,6 +85,46 @@ $PY -m ecstasy.cli compare --dataset recent_pp
 `experiment` too, not just `run` — FLOPs are length-dependent, so measurements
 from the old splits do not transfer to this one.
 
+### Results (2026-08-17, 151 dimers, all cells complete)
+
+P@K is inter-chain precision at K = #true inter contacts. FLOPs are true FLOPs
+(2*MACs) over the contact-map dependency subgraph, measured on a length-representative
+26-entry subset (`--shard 0/6`: mean L 608 vs 611 for the full split).
+
+| rung | ESMFold P@K | Boltz-2 (no MSA) P@K | ESMFold TFLOPs | Boltz-2 TFLOPs |
+|------|-------------|----------------------|----------------|----------------|
+| r0   | 0.243       | 0.047                | 56.5           | 70.6           |
+| r1   | 0.263       | 0.058                | 109.3          | 141.1          |
+| r3   | **0.288**   | 0.081                | 214.9          | 282.2          |
+| r5   | 0.285       | **0.094**            | 332.2          | 423.2          |
+
+- **ESMFold dominates under single-sequence conditions**: ~5x Boltz-2 at matched
+  compute (r0 vs r0, within 20% on FLOPs), and its *cheapest* rung beats Boltz-2's
+  *most expensive* — 0.243 at 56.5 TFLOPs vs 0.094 at 423.2. Read this as a statement
+  about single-sequence priors, not about Boltz-2 in general: Boltz-2 is an MSA model
+  being run in its deliberate worst case, and it says so itself in the log ("Found
+  explicit empty MSA … predictions will be suboptimal").
+- **Recycling saturates.** ESMFold peaks at r3 and is flat-to-down at r5 (their
+  bootstrap CIs overlap); Boltz-2 is still climbing at r5.
+- **The mean hides a bimodal distribution — do not quote it alone.** ESMFold r3 scores
+  *exactly* 0 on 43% of dimers and >0.8 on 10.6%; Boltz-2 r5 is 0 on 57% and >0.5 on
+  only 6%. These models either largely solve an interface or get nothing. Recycling
+  mostly converts total failures into successes (ESMFold zeros: 51.7% at r0 -> 43.0%
+  at r3) rather than sharpening already-good predictions.
+- **Chebyshev tolerance** (`--tolerance 2`, GT dilated by a 5x5 L-inf ball) lifts
+  ESMFold r3 to 0.397 and Boltz-2 r5 to 0.146, but it inflates the positive set 9.05x,
+  so a random predictor also rises from 0.0026 to 0.0234. In enrichment-over-random
+  terms both models look *worse* tolerant than exact (ESMFold r3: 111x -> 17x), i.e.
+  their hits are mostly exact rather than near-misses. The ranking is unchanged.
+- **Decision 8c holds** (per-entry, common subset): Boltz-2 FLOPs ratios are
+  1.9988 +/- 0.0006 / 3.9963 +/- 0.0017 / 5.9938 +/- 0.0029 against 2/4/6, with an
+  intercept of 0.1% of a single pass. ESMFold sits below (1.894/3.681/5.468) with a
+  6.7% intercept, which is exactly right — ESM-2 runs once and only the folding trunk
+  recycles.
+
+Figure: `$DATA_ROOT/runs/recent_pp/pak_vs_flops.png` (+pdf), table:
+`comparison.csv`/`.md` in the same directory.
+
 ## Notes
 
 - **Legacy predictions** under `$DATA_ROOT/ecstasy/benchmarks/<name>/` (the old
