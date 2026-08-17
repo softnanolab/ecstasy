@@ -47,18 +47,26 @@ from pathlib import Path
 import numpy as np
 import torch
 
-# 128 output bins, Algorithm 12. Kept as the expected grid; the real one is read off the
-# model's logits and cross-checked against this so a checkpoint change fails loudly.
-_N_BINS = 128
+def _bin_midpoints_128() -> torch.Tensor:
+    """Algorithm 12's grid: 128 bins, midpoints 1.5 .. 54.5 A.
 
-
-def _bin_midpoints() -> torch.Tensor:
-    """Distance-bin midpoints of the ESMFold2 distogram head (1.5 .. 54.5 A)."""
-    boundaries = torch.linspace(2, 52.0, _N_BINS - 1)
-    lower = torch.tensor([1.0])
-    upper = torch.tensor([52.0 + 5.0])
-    edges = torch.cat((lower, boundaries, upper))
+    Used by the -Experimental checkpoints (the binder-design cookbook's
+    ``get_mid_points``). Note the open-ended first/last bins.
+    """
+    boundaries = torch.linspace(2, 52.0, 127)
+    edges = torch.cat((torch.tensor([1.0]), boundaries, torch.tensor([52.0 + 5.0])))
     return (edges[:-1] + edges[1:]) / 2
+
+
+def _bin_midpoints_uniform(n_bins: int, min_dist: float, max_dist: float) -> torch.Tensor:
+    """Uniform grid: ``n_bins`` equal bins spanning [min_dist, max_dist]."""
+    width = (max_dist - min_dist) / n_bins
+    return min_dist + (torch.arange(n_bins, dtype=torch.float32) + 0.5) * width
+
+
+def _cutoff_bin(mids: torch.Tensor, threshold_a: float) -> int:
+    """Number of leading bins strictly below ``threshold_a``."""
+    return int((mids < threshold_a).sum())
 
 
 def _assert_clean_checkpoint(model, repo_id: str, max_train_date: str) -> None:
@@ -102,6 +110,9 @@ def main():
 
     num_loops = int(cfg.get("num_loops", 0))
     threshold_a = float(cfg.get("contact_threshold_a", 7.9375))
+    # Grid for a 64-bin (release) head; overridable, but 2-22 A is what calibration says.
+    min_dist = float(cfg.get("distogram_min_a", 2.0))
+    max_dist = float(cfg.get("distogram_max_a", 22.0))
     repo_id = str(cfg.get("checkpoint", "biohub/ESMFold2"))
     max_train_date = str(cfg.get("max_train_date", "2025-01-01"))
     seed = cfg.get("seed")
@@ -228,16 +239,39 @@ def main():
     logits = output["distogram_logits"]
     if logits.dim() == 4:                      # (B, L, L, bins) -> drop batch
         logits = logits[0]
+    # Which grid the head uses depends on the checkpoint, and the shipped code does NOT
+    # say: distogram_head is a bare nn.Linear and nothing in the package ever maps its
+    # bins to distances (that lives in unshipped training code). The ranges are therefore
+    # established as follows, and the runner refuses anything it has not established.
+    #
+    #  64 bins (release, biohub/ESMFold2): uniform over 2-22 A — the SAME grid as the
+    #    MENTOS ground truth and Boltz-2, so contact_cutoff_bin 19 == 7.9375 A applies
+    #    here after all. Recovered empirically rather than assumed: taking the median GT
+    #    Cb-Cb distance among pairs sharing a predicted argmax bin reproduces
+    #    2.0 + (b + 0.5) * 0.3125 exactly at every populated bin (bin 10 -> 5.28 A,
+    #    11 -> 5.59, 60 -> 20.91, 61 -> 21.22, 62 -> 21.53), with a fitted width of
+    #    0.305 A stable across confidence thresholds. Independently anchored by backbone
+    #    (i, i+1) pairs, covalently fixed near 5.4 A, whose modal predicted bin is 10.
+    #
+    #  128 bins (-Experimental): Algorithm 12's 1.5-54.5 A grid, per the cookbook's
+    #    get_mid_points(). There 7.9375 A falls at 16 bins, NOT 19 — the two checkpoint
+    #    families genuinely differ, which is why the threshold is specified in Angstrom.
     n_bins = logits.shape[-1]
-    if n_bins != _N_BINS:
+    if n_bins == 128:
+        mids = _bin_midpoints_128()
+        grid = "algorithm-12 1.5-54.5A"
+    elif n_bins == 64:
+        mids = _bin_midpoints_uniform(64, min_dist, max_dist)
+        grid = f"uniform {min_dist}-{max_dist}A"
+    else:
         raise RuntimeError(
-            f"expected a {_N_BINS}-bin distogram head, got {n_bins}. The Angstrom->bin "
-            f"mapping in this runner is calibrated to Algorithm 12's grid; re-derive it "
-            f"before trusting any contact map from this checkpoint."
+            f"distogram head has {n_bins} bins, which this runner has no calibrated "
+            f"distance grid for (it knows 64 = uniform 2-22A and 128 = Algorithm 12). "
+            f"Recover the grid before trusting any contact map from this checkpoint — "
+            f"see ESMFOLD2_INTEGRATION.md for the median-GT-per-bin procedure."
         )
 
-    mids = _bin_midpoints()
-    cutoff_bin = int((mids < threshold_a).sum())
+    cutoff_bin = _cutoff_bin(mids, threshold_a)
     if not 0 < cutoff_bin < n_bins:
         raise RuntimeError(f"threshold {threshold_a} A maps to bin {cutoff_bin}, out of range")
     print(f"[esmfold2] threshold {threshold_a} A -> summing bins 0..{cutoff_bin - 1} "
