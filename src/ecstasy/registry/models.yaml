@@ -61,6 +61,30 @@ esmfold:
     r3: {num_recycles: 3, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
     r5: {num_recycles: 5, chain_linker_length: 32, residue_index_offset: 512, contact_cutoff_bin: 19}
 
+# ESMFold2 = ESMC-6B (frozen) + a recurrent pair-only folding trunk + diffusion; the
+# contact map is read off the trunk's distogram head, before diffusion. Genuine
+# multi-chain input, so no poly-G linker and no residue_index_offset — unlike ESMFold.
+# Needs its own py3.12 venv (scripts/install/esmfold2.sh): ESMFold-v1's env is pinned to
+# py3.7 by openfold's cp37 CUDA extension, while esm requires >=3.12.
+#
+# NOTE the threshold is in ANGSTROM, not a bin index. ESMFold2's output head is 128 bins
+# over ~1.5-54.5 A, NOT the 64-bin 2-22 A grid that Boltz-2 and the MENTOS ground truth
+# share — that 64-bin grid is ESMFold2's *input conditioning* distogram. Setting
+# contact_cutoff_bin: 19 here would score at ~8.9 A instead of 7.94 A and silently
+# inflate P@K. The runner derives the bin index from the model's own grid.
+esmfold2:
+  runner: esmfold2_runner.py
+  env: ${ENVS_ROOT}/.venv-esmfold2
+  msa: none
+  default_preset: r3
+  presets:
+    # num_loops is ESMFold2's recycle knob — the same compute axis as esmfold's
+    # num_recycles and boltz2's recycling_steps, so the ladders are comparable.
+    r0: {num_loops: 0, contact_threshold_a: 7.9375, checkpoint: biohub/ESMFold2}
+    r1: {num_loops: 1, contact_threshold_a: 7.9375, checkpoint: biohub/ESMFold2}
+    r3: {num_loops: 3, contact_threshold_a: 7.9375, checkpoint: biohub/ESMFold2}
+    r5: {num_loops: 5, contact_threshold_a: 7.9375, checkpoint: biohub/ESMFold2}
+
 # ESM2 supervised contact head (facebookresearch/esm contact_prediction.ipynb), adapted
 # for dimers with the same poly-G-linker multimer hack as ESMFold. ESM2 uses rotary
 # (relative) positions, so the linker length *is* the positional skip — there is no
