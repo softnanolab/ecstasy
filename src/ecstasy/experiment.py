@@ -41,7 +41,21 @@ def expand(manifest: dict) -> list[Run]:
 
 
 def run_experiment(path: str, limit: int | None = None, score: bool = True,
-                   profile: bool = False) -> None:
+                   profile: bool = False, shard: str | None = None) -> None:
+    """Run every dataset×model combination in `manifest`.
+
+    `shard` ("i/N") is forwarded to run_predict so one manifest can be spread over N
+    concurrent jobs. Every runner is a fresh subprocess that reloads its weights per
+    entry, so the model-load cost is paid 151× per run either way; sharding is what
+    keeps that off the critical path, and short jobs also backfill far better than one
+    long one on a contested queue. Shards skip entries whose contact.npz (and, under
+    --profile, flops.json) already exists, so they never collide and are resumable.
+
+    Scoring is suppressed while sharding: each shard only predicts its own slice, so
+    letting it score would race the other shards writing the same result.json and
+    persist a summary over a partial set. Score once after the shards finish, with the
+    same manifest and no --shard.
+    """
     manifest = load_manifest(path)
     runs = expand(manifest)
     print(f"experiment {manifest.get('name', Path(path).stem)}: {len(runs)} run(s)")
@@ -50,8 +64,11 @@ def run_experiment(path: str, limit: int | None = None, score: bool = True,
     if limit == 0:
         print("\n(dry run: --limit 0, nothing executed)")
         return
+    if shard and score:
+        print(f"[shard {shard}] scoring suppressed; re-run without --shard to score")
+        score = False
     for r in runs:
         print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} ===")
-        run_predict(r, limit=limit, profile=profile)
+        run_predict(r, limit=limit, profile=profile, shard=shard)
         if score:
             run_score(r, limit=limit)
