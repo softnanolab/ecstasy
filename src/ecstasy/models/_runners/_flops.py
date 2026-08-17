@@ -84,6 +84,21 @@ def profile_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[Any
     what makes the count scale correctly with recycles.
     """
     if FlopCounterMode is not None:
+        # FlopCounterMode is a TorchDispatchMode, and torch.inference_mode() bypasses the
+        # Python dispatch key: __torch_dispatch__ is simply never invoked, so every op
+        # counts as zero and the run completes "successfully" with a garbage number.
+        # This is not hypothetical — it is what produced Boltz-2's identical 2.929e9
+        # across the whole recycle ladder, via Lightning's Trainer, which enables
+        # inference_mode by default for predict. Any runner that profiles inside a
+        # Lightning predict loop hits it. Fail loudly instead of returning a plausible
+        # lie; the caller's fix is Trainer(inference_mode=False) or torch.no_grad().
+        if getattr(torch, "is_inference_mode_enabled", lambda: False)():
+            raise RuntimeError(
+                "profile_call() invoked under torch.inference_mode(): FlopCounterMode "
+                "cannot observe any op there and would report 0 FLOPs. Run the profiled "
+                "forward under torch.no_grad() instead (for PyTorch Lightning, construct "
+                "the Trainer with inference_mode=False)."
+            )
         fc = FlopCounterMode(display=False)
         with fc:
             result = fn(*args, **kwargs)
