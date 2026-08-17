@@ -170,6 +170,32 @@ sidecar when `--profile` is set.
   and to need checking against A100-40GB GPU capacity at L≈1000, the `recent_pp` max.
 - **Sequence lengths.** `recent_pp` is 151 two-chain complexes, median L=618, max L=1006.
 
+## 7.1 Implementation notes (built 2026-08-17)
+
+Shipped as `src/ecstasy/models/_runners/esmfold2_runner.py`, `scripts/install/esmfold2.sh`,
+the `esmfold2` block in `models.yaml`, and `experiments/recent_pp_esmfold2_ladder.yaml`.
+Three things the spec above did not anticipate:
+
+- **Do not use the packaged `ESMFold2InputBuilder.fold()`.** It is the obvious entry
+  point and it is the wrong one twice over: it runs the full diffusion sampler
+  (`num_sampling_steps=200` by default), and it defaults to `lm_dropout=0.3`, which is
+  **stochastic on purpose** — a fresh dropout mask per loop so repeated folds give a
+  diverse ensemble. A benchmark number has to be reproducible, so the runner drives the
+  forward directly with dropout disabled. Note the failure mode is silent: `fold()`
+  would have returned perfectly plausible contact maps that simply differed run to run.
+- **Dropout is off unless something turns it on.** `_lm_dropout_context` is a no-op for
+  `0`/`None`, so the risk is only via `fold()`'s default. The runner still calls
+  `configure_lm_dropout(0.0, force_lm_dropout_during_inference=False)` defensively, in
+  case a checkpoint ships a non-zero value in its config.
+- **`forward` accepts `**kwargs`**, so the extra keys `prepare_input` returns
+  (`gt_coords`, `frames_idx`, `disto_cond`, …) are absorbed rather than raising. Passing
+  the whole feature dict through, exactly as `fold()` does, is therefore safe.
+
+Confirmed on the installed package: `TRITON_KERNELS_AVAILABLE` is True on this cluster
+(so the fused backend is used, not the `None` fallback), `configure_lm_dropout`'s
+signature matches the call, and the install self-check reproduces 128 bins with 16 below
+7.9375 A.
+
 ## 8. Validation gates before trusting any number
 
 1. Bin arithmetic reproduced from the loaded model's own edges, asserting 16 bins below

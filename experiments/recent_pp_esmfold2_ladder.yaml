@@ -1,0 +1,26 @@
+# ESMFold2 recycle ladder on the recent-PP val split.
+#
+# Kept as its own manifest rather than appended to recent_pp_nomsa_ladder.yaml: ESMFold2
+# runs in a different venv (py3.12; see scripts/install/esmfold2.sh) and pulls a large
+# ESMC-6B checkpoint, so it is worth being able to schedule and re-run it independently
+# of the ESMFold/Boltz-2 sweep that is already done.
+#
+# Run:   ecstasy experiment experiments/recent_pp_esmfold2_ladder.yaml --profile
+# Dry:   ecstasy experiment experiments/recent_pp_esmfold2_ladder.yaml --limit 0
+# Smoke: ecstasy run --dataset recent_pp --model esmfold2 --preset r0 --limit 1
+#
+# num_loops is ESMFold2's recycle knob, so this ladder is directly comparable with
+# esmfold's num_recycles and boltz2's recycling_steps ladders — same compute axis.
+# Everything else is held at the preset defaults so the compute→P@K line isolates it.
+#
+# The contact threshold is an ANGSTROM distance, not a bin index: ESMFold2's output
+# distogram is 128 bins over ~1.5–54.5 A, unlike the 64-bin 2–22 A grid shared by
+# Boltz-2 and the ground truth. See ESMFOLD2_INTEGRATION.md.
+name: recent_pp_esmfold2_ladder
+datasets:
+  - recent_pp
+runs:
+  - {model: esmfold2, preset: r0}
+  - {model: esmfold2, preset: r1}
+  - {model: esmfold2, preset: r3}
+  - {model: esmfold2, preset: r5}
