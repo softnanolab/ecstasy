@@ -85,7 +85,49 @@ $PY -m ecstasy.cli compare --dataset recent_pp
 `experiment` too, not just `run` — FLOPs are length-dependent, so measurements
 from the old splits do not transfer to this one.
 
-### Results (2026-08-17, 151 dimers, all cells complete)
+### Results with ESMFold2 (2026-08-18, 151 dimers, all three models complete)
+
+Inter-chain P@K at exact match and at Chebyshev ±2 (GT dilated by a 5×5 L∞ ball).
+
+| rung | ESMFold2 | | ESMFold | | Boltz-2 (no MSA) | |
+|------|---------:|---------:|--------:|--------:|-----:|-----:|
+|      | tol=0 | ±2 | tol=0 | ±2 | tol=0 | ±2 |
+| r0   | 0.450 | 0.562 | 0.243 | 0.353 | 0.047 | 0.113 |
+| r1   | 0.473 | 0.574 | 0.263 | 0.370 | 0.058 | 0.127 |
+| r3   | 0.488 | 0.582 | **0.288** | **0.397** | 0.081 | 0.162 |
+| r5   | **0.512** | **0.608** | 0.285 | 0.391 | **0.094** | **0.173** |
+
+**ESMFold2 changes the qualitative picture, not just the ranking.** The means understate
+it, because ESMFold's mean is propped up by a minority of successes:
+
+| | median | ==0 | >0.5 | >0.8 |
+|---|---:|---:|---:|---:|
+| ESMFold2 r5 | **0.698** | 26.5% | 58.9% | 42.4% |
+| ESMFold2 r0 | 0.447 | 26.5% | 49.0% | 36.4% |
+| ESMFold r3   | 0.042 | 43.0% | 32.5% | 10.6% |
+| Boltz-2 r5   | 0.000 | 57.0% | 6.0% | 1.3% |
+
+ESMFold2 is 1.8× ESMFold on the mean but **17× on the median** (0.698 vs 0.042), and
+substantially solves (>0.8) 42% of dimers against ESMFold's 11%. ESMFold gets *nothing*
+on 43% of the split; ESMFold2 on 26.5%. Even ESMFold2's cheapest rung beats ESMFold's
+best by a wide margin.
+
+Also note ESMFold2 has **not saturated** at r5 (0.450 → 0.512, still climbing), whereas
+ESMFold peaks at r3 and is flat-to-down at r5.
+
+The ±2 tolerance gain is inversely ordered with accuracy — ESMFold2 +19–25%, ESMFold
++37–45%, Boltz-2 +84–142% — i.e. the stronger the model, the more of its hits are
+already exact rather than near-misses. Read tolerant numbers against the random baseline
+(0.0026 exact → 0.0234 at ±2; the positive set inflates 9.05×).
+
+ESMFold2 runs deterministic single-pass here (see ESMFOLD2_INTEGRATION.md §7.1), so it
+is if anything a floor relative to the paper's ensembled folding-eval protocol.
+
+**ESMFold2 FLOPs are not reported**: the measurement omits the ESMC-6B backbone and
+understates cost by roughly a third; the runner now refuses to emit such a sidecar. Its
+accuracy numbers are unaffected — the ladder runs without `--profile`.
+
+### Results, ESMFold and Boltz-2 only (2026-08-17, 151 dimers)
 
 P@K is inter-chain precision at K = #true inter contacts. FLOPs are true FLOPs
 (2*MACs) over the contact-map dependency subgraph, measured on a length-representative
