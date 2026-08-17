@@ -111,6 +111,8 @@ def main():
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import _flops
 
+    from transformers import AutoConfig
+    from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
     from transformers.models.esmfold2.modeling_esmfold2_common import (
         BACKEND_CUEQ, BACKEND_FUSED, CUE_AVAILABLE, TRITON_KERNELS_AVAILABLE,
     )
@@ -125,7 +127,20 @@ def main():
     print(f"[esmfold2] device={device}  num_loops={num_loops}  "
           f"threshold={threshold_a} A", flush=True)
 
-    model = ESMFold2ExperimentalModel.from_pretrained(repo_id)
+    # Two model classes ship side by side and they are NOT interchangeable: the released
+    # checkpoints declare config.type == "release" and want ESMFold2Model, while the
+    # -Experimental checkpoints want ESMFold2ExperimentalModel. The packaged code
+    # disambiguates on exactly this field (see _lm_dropout_context, which reads
+    # config.lm_encoder.lm_dropout for release and top-level config.lm_dropout for
+    # experimental). The binder-design cookbook uses the experimental class only because
+    # it loads experimental checkpoints — copying that blindly against biohub/ESMFold2
+    # mismatches the weights. Pick from the config rather than hardcoding either.
+    _cfg = AutoConfig.from_pretrained(repo_id)
+    ckpt_type = getattr(_cfg, "type", None)
+    model_cls = ESMFold2ExperimentalModel if ckpt_type == "experimental" else ESMFold2Model
+    print(f"[esmfold2] config.type={ckpt_type!r} -> {model_cls.__name__}", flush=True)
+
+    model = model_cls.from_pretrained(repo_id)
     _assert_clean_checkpoint(model, repo_id, max_train_date)
 
     # Triton / cuequivariance kernels are optional accelerations with an explicit None
@@ -139,9 +154,39 @@ def main():
     model.set_kernel_backend(kernel_backend)
     print(f"[esmfold2] kernel_backend={kernel_backend}", flush=True)
 
-    # Determinism: kill the ensemble-diversity dropout that fold() enables by default.
+    # Determinism. This is NOT belt-and-braces — the release checkpoint is stochastic at
+    # inference out of the box. biohub/ESMFold2 ships lm_encoder.lm_dropout=0.25 with
+    # per_loop_lm_dropout=True, and modeling_esmfold2.py applies it with a hardcoded
+    # `F.dropout(..., training=True)`:
+    #
+    #     # training=True forces dropout under eval(), matching the per-loop
+    #     # dropout strategy used at train time.
+    #
+    # so .eval() does not switch it off, and the gate never consults the config's own
+    # force_lm_dropout_during_inference=False. Left alone, every run returns a different
+    # contact map. configure_lm_dropout() only exists on the experimental class, so zero
+    # it on the config, which works for both.
+    #
+    # Note this is a deliberate methodological choice, not just a bug workaround: the
+    # packaged fold() defaults to lm_dropout=0.3 and describes it as the paper's
+    # folding-eval value, i.e. the published protocol *ensembles* several stochastic
+    # folds. A single dropout-free pass is what makes ESMFold2 comparable with ESMFold
+    # and Boltz-2 here (one deterministic forward, one FLOPs number), so expect this to
+    # read lower than an ensembled result. `lm_dropout` is exposed as a param for anyone
+    # who wants the ensemble behaviour back.
+    lm_dropout = float(cfg.get("lm_dropout", 0.0))
+    lm_cfg = getattr(model.config, "lm_encoder", None)
+    before = getattr(lm_cfg, "lm_dropout", None) if lm_cfg is not None else None
+    if lm_cfg is not None and hasattr(lm_cfg, "lm_dropout"):
+        lm_cfg.lm_dropout = lm_dropout
+        if hasattr(lm_cfg, "per_loop_lm_dropout"):
+            lm_cfg.per_loop_lm_dropout = lm_dropout > 0.0
+    if hasattr(model.config, "lm_dropout"):
+        model.config.lm_dropout = lm_dropout
     if hasattr(model, "configure_lm_dropout"):
-        model.configure_lm_dropout(0.0, force_lm_dropout_during_inference=False)
+        model.configure_lm_dropout(lm_dropout, force_lm_dropout_during_inference=False)
+    print(f"[esmfold2] lm_dropout {before} -> {lm_dropout} "
+          f"({'deterministic' if lm_dropout == 0.0 else 'STOCHASTIC'})", flush=True)
 
     model = model.to(device=device).eval().requires_grad_(False)
 
@@ -155,14 +200,24 @@ def main():
     flops_payload = None
 
     def _forward():
-        return model(
-            **features,
-            num_diffusion_samples=1,
-            num_sampling_steps=1,        # off the contact path; keeps FLOPs on the trunk
-            num_loops=num_loops,
-            calculate_confidence=False,
-            seed=seed,
-        )
+        # bfloat16 autocast is required, not an optimisation. from_pretrained keeps the
+        # checkpoint's bf16 weights while prepare_input hands back fp32 features, so an
+        # un-autocast forward dies inside the pair transition with
+        #   "self and mat2 must have the same dtype, but got BFloat16 and Float".
+        # The cookbook does not hit this only because its design path happens to build
+        # its own tensors at the model dtype. bf16 is also the released model's native
+        # inference precision, so this matches intended usage rather than working around
+        # it. Dtype does not affect the FLOP count — the counter keys off matmul shapes.
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
+                            enabled=(device.type == "cuda")):
+            return model(
+                **features,
+                num_diffusion_samples=1,
+                num_sampling_steps=1,    # off the contact path; keeps FLOPs on the trunk
+                num_loops=num_loops,
+                calculate_confidence=False,
+                seed=seed,
+            )
 
     with torch.no_grad():
         if profile:
