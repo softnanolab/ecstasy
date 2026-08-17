@@ -307,6 +307,28 @@ def main():
           f"cutoff_bin={cutoff_bin}", flush=True)
 
     if profile and flops_payload is not None:
+        # The ESMC-6B backbone runs inside this forward (the model calls
+        # _compute_lm_hidden_states when lm_hidden_states is None) but does not show up
+        # in the count: at L=689 the total equals folding_trunk + lm_encoder +
+        # confidence_head + parcae_coda exactly, with no ESMC term, giving an implied
+        # backbone cost of ~1.5e12 against the ~8e12 that 2*N*L predicts for 6B params.
+        # So the number understates ESMFold2's true cost by roughly a third and must not
+        # be published as-is — it would make ESMFold2 look far cheaper than it is, which
+        # is precisely the comparison this benchmark exists to make.
+        #
+        # `lm_encoder` is NOT the backbone; it is the small projection of ESMC's hidden
+        # states into the trunk, hence the deliberately specific match below.
+        by_mod = flops_payload.get("by_module") or {}
+        esmc = sum(v for k, v in by_mod.items()
+                   if "esmc" in k.lower() or k.lower().endswith("._esmc"))
+        if esmc <= 0:
+            raise RuntimeError(
+                "FLOPs profiling recorded nothing for the ESMC backbone, which "
+                "demonstrably runs in this forward — the count is missing the language "
+                "model and understates total cost. Modules seen: "
+                f"{sorted(by_mod)}. Resolve before reporting ESMFold2 FLOPs; see "
+                "ESMFOLD2_INTEGRATION.md."
+            )
         sidecar = _flops.write_flops_sidecar(
             out_dir, flops_payload,
             L=int(contact.shape[0]), msa_depth=0, recycles=num_loops, model="esmfold2",
