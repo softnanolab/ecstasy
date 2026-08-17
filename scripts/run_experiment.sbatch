@@ -55,10 +55,17 @@ if [[ ! -d "${REPO_ROOT}/src/ecstasy" ]]; then
 fi
 mkdir -p "${REPO_ROOT}/logs"
 
-# Filesystem roots come from the repo-root .env (env > .env). A git worktree has no
-# .env of its own, so fall back to the main checkout's copy.
+# Filesystem roots come from the repo-root .env, but a variable already present in the
+# environment wins over the file — that is what lets you point a one-off run at a
+# scratch tree, e.g. `DATA_ROOT=/…/data_debug sbatch scripts/run_experiment.sbatch …`.
+# `set -a; source .env` alone does the opposite (the file clobbers the caller), so
+# snapshot the exported environment first and re-apply it afterwards. Using bash's own
+# `export -p` output rather than hand-parsing .env keeps quoting/escaping correct.
 if [[ -f "${REPO_ROOT}/.env" ]]; then
+  _ecstasy_pre_env="$(export -p)"
   set -a; source "${REPO_ROOT}/.env"; set +a
+  eval "${_ecstasy_pre_env}"
+  unset _ecstasy_pre_env
 fi
 
 VENV="${ECSTASY_VENV:-${ENVS_ROOT:?set ECSTASY_VENV or ENVS_ROOT}/.venv-mentos}"
