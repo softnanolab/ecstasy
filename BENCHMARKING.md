@@ -125,6 +125,39 @@ P@K is inter-chain precision at K = #true inter contacts. FLOPs are true FLOPs
 Figure: `$DATA_ROOT/runs/recent_pp/pak_vs_flops.png` (+pdf), table:
 `comparison.csv`/`.md` in the same directory.
 
+## ESMFold2 on recent_pp
+
+Separate venv and separate manifest — ESMFold2 needs py3.12 (ESMFold-v1's env is pinned
+to py3.7 by openfold's cp37 CUDA extension) and pulls a large ESMC-6B checkpoint.
+
+```bash
+# once
+bash scripts/install/esmfold2.sh          # builds .venv-esmfold2, self-checks the bin grid
+
+# smoke, then the ladder
+$PY -m ecstasy.cli run --dataset recent_pp --model esmfold2 --preset r0 --limit 1
+sbatch --mem=96G scripts/run_experiment.sbatch \
+       experiments/recent_pp_esmfold2_ladder.yaml --profile
+```
+
+`num_loops` is ESMFold2's recycle knob, so its r0/r1/r3/r5 ladder is directly comparable
+with esmfold's `num_recycles` and boltz2's `recycling_steps`.
+
+**Its contact threshold is an Ångström distance, not a bin index.** ESMFold2's output
+distogram is 128 bins over ~1.5–54.5 Å, *not* the 64-bin 2–22 Å grid that Boltz-2 and the
+MENTOS ground truth share — that 64-bin grid is ESMFold2's input *conditioning*
+distogram. `contact_cutoff_bin: 19` would score at ~8.9 Å instead of 7.94 Å. The runner
+derives the bin index from the model's own grid and refuses to run if the head is not 128
+bins. See `ESMFOLD2_INTEGRATION.md`.
+
+Two other traps, both silent rather than loud:
+
+- Do **not** use the packaged `fold()`. It runs the full 200-step diffusion sampler and
+  defaults to `lm_dropout=0.3`, which is stochastic by design — it would return plausible
+  contact maps that differ between runs.
+- Do **not** use a `-Cutoff2025` checkpoint; its training data overlaps the recent_pp
+  holdout. The runner refuses them and checks the loaded config's cutoff.
+
 ## Notes
 
 - **Legacy predictions** under `$DATA_ROOT/ecstasy/benchmarks/<name>/` (the old
