@@ -84,6 +84,42 @@ $PYB -m ecstasy.cli run --dataset $split --model msa_pairformer --preset full   
 (In practice each `(split, model, preset)` cell is one SLURM array task — see the
 template below.)
 
+**Sharded sweep, then finish it.** A whole manifest can be spread over N concurrent jobs
+with `--shard i/N`; shards skip entries whose `contact.npz` (plus `flops.json` under
+`--profile`) already exists, so they never collide and are resumable. Short jobs also
+backfill far better than one long one on a contested queue.
+
+```bash
+N=12
+for i in $(seq 0 $((N-1))); do
+  sbatch --time=08:00:00 --cpus-per-task=8 --job-name="ecst-s${i}" \
+         scripts/run_experiment.sbatch experiments/recent_pp_nomsa_ladder.yaml --shard "${i}/${N}"
+done
+```
+
+Scoring is deliberately suppressed while sharding — each shard sees only its own slice,
+so letting it score would race the other shards on the same `result.json` and persist a
+summary over a partial set. Finish with an unsharded pass over the same manifest, which
+re-uses every prediction on disk and only scores:
+
+```bash
+# 0. anything still missing? (expect 8 runs x 151 entries = 1208)
+find "$DATA_ROOT/runs/recent_pp" -name contact.npz | wc -l
+# resubmit the same shard command to pick up stragglers — it is idempotent
+
+# 1. score (predictions are skipped, so this is cheap and CPU-only)
+$PYB -m ecstasy.cli experiment experiments/recent_pp_nomsa_ladder.yaml
+
+# 2. comparison table -> runs/recent_pp/comparison.csv + .md
+$PYB -m ecstasy.cli compare --dataset recent_pp
+
+# 3. figure (95% bootstrap CI over proteins, deterministic seed)
+$PYB scripts/mentos-perf-benchmarking/plot_pak_vs_flops.py --dataset recent_pp
+```
+
+Step 3 needs `flops.json` sidecars; without them there is no x-axis. See
+`FLOPS_BENCHMARK_PLAN.md` §2.1 before trusting any FLOPs number.
+
 **Chain-order (swap) experiment** — NOT currently registered. `swap_chains: true` is
 still implemented by `MentosSquareDataset`, but the `val_seq_pair_swapped` row went away
 with its parquet. To run it again, add a swapped row for `recent_pp` under its own name
