@@ -62,7 +62,32 @@ comparison with structures the model may have trained on.
 it is not the expected one. Do not trust the repo id string alone — a typo or a default
 change upstream would be undetectable in the results otherwise.
 
-## 4. Contact extraction — do NOT reuse `contact_cutoff_bin: 19`
+## 4. Contact extraction — the grid depends on the checkpoint
+
+> **CORRECTION (2026-08-17, after building it).** The section below was written from the
+> binder-design cookbook and is right about the **-Experimental** checkpoints and wrong
+> about the **release** one we actually benchmark. `biohub/ESMFold2` has
+> `structure_head.distogram_bins = 64` on a uniform **2–22 Å** grid — the same grid as
+> the MENTOS ground truth and Boltz-2 — so `contact_cutoff_bin: 19` == 7.9375 Å **does**
+> apply there. The 128-bin 1.5–54.5 Å grid below applies to `-Experimental`, where the
+> same distance is 16 bins. Keeping the threshold in Ångström is what makes both work.
+>
+> The range is not recoverable from the shipped code: `distogram_head` is a bare
+> `nn.Linear` and nothing in the package maps its bins to distances (that lives in
+> unshipped training code). The 2–52 Å cited below belongs to `ConfidenceHeadConfig`'s
+> defaults — a different head.
+>
+> **How the release grid was established** (repeat this for any new checkpoint):
+> regressing GT distance on argmax bin is attenuated — the GT spans only 2–22 Å and the
+> predicted bin is noisy — and gave a meaningless 0.205 Å width. Instead take the
+> **median GT Cβ–Cβ distance among pairs sharing a predicted argmax bin**. That is
+> robust and assumption-free, and it reproduced `2.0 + (b + 0.5) × 0.3125` exactly at
+> every populated bin (10 → 5.28 Å, 11 → 5.59, 60 → 20.91, 61 → 21.22, 62 → 21.53), with
+> a fitted width of 0.305 Å stable across confidence cutoffs. Independently anchored on
+> backbone `(i, i+1)` pairs — covalently fixed near 5.4 Å — whose modal predicted bin is
+> 10, i.e. 5.28 Å on that grid.
+>
+> The runner refuses any bin count it has no calibrated grid for, rather than guessing.
 
 This corrects an earlier assumption in the benchmark plan.
 
@@ -195,6 +220,31 @@ Confirmed on the installed package: `TRITON_KERNELS_AVAILABLE` is True on this c
 (so the fused backend is used, not the `None` fallback), `configure_lm_dropout`'s
 signature matches the call, and the install self-check reproduces 128 bins with 16 below
 7.9375 A.
+
+## 7.2 Validated (2026-08-17)
+
+Smoke on `recent_pp/10bl` (job 63298), all gates green:
+
+```
+config.type='release' -> ESMFold2Model
+kernel_backend=fused
+lm_dropout 0.25 -> 0.0 (deterministic)
+threshold 7.9375 A -> summing bins 0..18 of 64 (last included midpoint 7.7812 A)
+contact.npz shape=(689, 689)   # == len(chainA) + len(chainB) = 344 + 345
+P@K=0.568 AUC=0.840
+```
+
+It took four GPU attempts, each finding a distinct real problem, which is worth
+recording because three of the four were silent rather than loud:
+
+1. wrong model class (experimental vs release) → dtype crash in the pair transition;
+2. the release checkpoint applying 25% LM dropout at inference despite `.eval()`;
+3. a cluster node SLURM had returned to service as `idle` but which was still broken
+   (`node-x12t-006`, exit 53 with unwritable logs) — not a code problem at all;
+4. the 128-bin grid assumption above, caught by the runner's own bin-count assertion.
+
+Only (1) and (3) announced themselves. (2) and (4) would each have produced entirely
+plausible contact maps and a wrong benchmark number.
 
 ## 8. Validation gates before trusting any number
 
