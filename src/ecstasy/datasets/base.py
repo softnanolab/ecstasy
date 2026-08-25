@@ -105,10 +105,19 @@ class Dataset(ABC):
         # whether a target had enough signal to be scored at all.
         _, gti, vi = ev.inter_block()
         out["K"] = float(int((gti & vi).sum()))
+        # TWO different notions, deliberately reported separately because they disagree
+        # sharply — on the 151-dimer val split, 39 vs 129 entries:
+        #
+        #   is_sequence_identical  the two chains are the SAME STRING. This is the one
+        #                          that matters for a poly-G linker hack, which feeds the
+        #                          language model one sequence duplicated around a
+        #                          glycine run — something it has never seen in training.
+        #   is_homodimer           the dataset's own flag, a looser homology notion.
+        #
+        # Reporting only the latter under the name "homodimer" would answer a different
+        # question than the one the split was introduced to answer.
+        out["is_sequence_identical"] = float(seqs[0] == seqs[1])
         if gt.get("is_homodimer") is not None:
-            # Reported wherever the GT knows it: under a poly-G linker hack a homodimer
-            # is one sequence duplicated around a glycine run, and pooling the two hides
-            # a failure mode that belongs to the hack rather than to the model.
             out["is_homodimer"] = float(bool(gt["is_homodimer"]))
         return out
 
