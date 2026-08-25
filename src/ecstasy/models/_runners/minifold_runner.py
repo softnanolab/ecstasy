@@ -44,8 +44,9 @@ coordinate-based.
 The chain break is linker AND index jump, both. ``FoldingTrunk.forward`` hardcoded
 ``residx = arange(L)`` upstream; the patched fork accepts an injected ``residx``, and
 ``RelativePosition`` clamps the pairwise difference at 32 bins, so a +512 jump saturates
-the clamp and the trunk reads two unrelated chains. Verified numerically: the residue-index
-difference across the break is 513.
+the clamp many times over and the trunk reads two unrelated chains. Verified numerically
+on 9zdi: the residue-index step from the last linker position to the first residue of
+chain B is 513, and from the last real residue of chain A it is 513 + linker_length.
 """
 from __future__ import annotations
 
