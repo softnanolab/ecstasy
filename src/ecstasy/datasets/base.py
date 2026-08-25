@@ -110,21 +110,45 @@ class Dataset(ABC):
             "sources": {k: str(v) for k, v in self.source_paths().items()},
         }
 
+    def has_gt(self, entry_id: str) -> bool:
+        """Is ground truth actually present for this entry? Loaders should override."""
+        return True
+
+    def coverage(self) -> dict:
+        """How much of this split can actually be scored here.
+
+        Entry count and ground-truth presence are different questions, and conflating
+        them hides the more dangerous one: an index can list 930 entries while only 76
+        have GT, in which case a run predicts 930 targets on a GPU and reports a mean
+        over 8% of the split that prints identically to a mean over all of it.
+        """
+        ids = [e.id for e in self.entries()]
+        missing = [i for i in ids if not self.has_gt(i)]
+        n = len(ids)
+        return {
+            "n_entries": n,
+            "n_gt_present": n - len(missing),
+            "n_gt_missing": len(missing),
+            "fraction": (n - len(missing)) / n if n else 0.0,
+            "missing_first_20": missing[:20],
+        }
+
     def verify(self) -> dict:
         """Check the split on disk still matches what the row claims.
 
-        Returns ``{ok, n_entries, expected_entries, problems[]}``. Counting walks the
-        index, so this is a deliberate command rather than something scoring pays for on
-        every run.
+        Returns ``{ok, n_entries, expected_entries, coverage, problems[]}``. Walks the
+        index and stats the GT, so it is a deliberate command rather than something
+        scoring pays for on every run.
         """
         problems: list[str] = []
         for key, path in self.source_paths().items():
             if not Path(path).exists():
                 problems.append(f"missing source {key}: {path}")
-        n = None
+        n, cov = None, None
         if not problems:
             try:
-                n = sum(1 for _ in self.entries())
+                cov = self.coverage()
+                n = cov["n_entries"]
             except Exception as e:  # noqa: BLE001
                 problems.append(f"could not enumerate entries: {type(e).__name__}: {e}")
         if n is not None and self.expected_entries is not None and n != self.expected_entries:
@@ -132,10 +156,16 @@ class Dataset(ABC):
                 f"entry count drift: found {n}, row declares expected_entries="
                 f"{self.expected_entries}. Either the split changed underneath published "
                 f"results, or the row is stale — resolve before trusting new numbers.")
+        if cov and cov["n_gt_missing"]:
+            problems.append(
+                f"ground truth missing for {cov['n_gt_missing']}/{cov['n_entries']} "
+                f"entries ({cov['fraction']:.1%} present) — this split cannot produce a "
+                f"complete result here.")
         if not self.description:
             problems.append("row has no description")
         return {"name": self.name, "ok": not problems, "n_entries": n,
-                "expected_entries": self.expected_entries, "problems": problems}
+                "expected_entries": self.expected_entries, "coverage": cov,
+                "problems": problems}
 
 
 def _registry() -> dict:

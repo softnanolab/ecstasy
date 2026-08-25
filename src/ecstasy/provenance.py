@@ -26,6 +26,7 @@ fails a benchmark run.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import platform
 import socket
@@ -114,10 +115,15 @@ def submodule_state(repo_root: Path | None = None) -> dict:
         if len(parts) < 2:
             continue
         sha, name = parts[0], parts[1]
+        uninitialised = marker == "-"
         out[name] = {
             "sha": sha,
-            "at_pin": marker != "+",
-            "uninitialised": marker == "-",
+            # An uninitialised submodule is NOT "at its pin" — there is no checkout at
+            # all, and the recorded sha describes a commit that was never materialised.
+            # Reporting at_pin=True here would read as "fine" for a submodule whose code
+            # is entirely absent, which is how eight empty submodules went unnoticed.
+            "at_pin": (marker != "+") and not uninitialised,
+            "uninitialised": uninitialised,
         }
     return out
 
@@ -203,15 +209,23 @@ def _static_env() -> dict:
 
 
 def capture(params: dict | None = None, repo_root: Path | None = None,
-            full_hash: bool = False) -> dict:
-    """The full provenance record for one run. Never raises."""
+            full_hash: bool = False, env: Path | None = None) -> dict:
+    """The full provenance record for one run. Never raises.
+
+    `env` is the model's venv; when given, what it has installed is recorded — that, not
+    the submodule table, is the authoritative record of which model code ran.
+    """
     root = Path(repo_root) if repo_root else _REPO_ROOT
     rec: dict = {
         "captured_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "ecstasy": git_state(root) or {"error": "not a git work tree"},
+        # Kept for context, NOT trusted as the record of what ran: submodules are
+        # frequently uninitialised while the real code is installed from elsewhere.
         "submodules": submodule_state(root),
         "env": _static_env(),
     }
+    if env is not None:
+        rec["venv"] = venv_packages(env)
     # Scheduler identity, when running under one — makes a result traceable back to the
     # job that produced it (and to its log).
     job = {k: os.environ[k] for k in ("PBS_JOBID", "SLURM_JOB_ID", "JOB_ID")
@@ -235,4 +249,91 @@ def summarise(rec: dict) -> str:
         g = p.get("git")
         if g and g.get("sha"):
             bits.append(f"{key} {g['sha'][:8]}{'-dirty' if g.get('dirty') else ''}")
+    for name, p in ((rec.get("venv") or {}).get("packages") or {}).items():
+        g = p.get("git")
+        if g and g.get("sha"):
+            bits.append(f"{name} {g['sha'][:8]}{'-dirty' if g.get('dirty') else ''}")
     return " | ".join(bits)
+
+
+# --- what a model's venv actually has installed ---------------------------------------
+#
+# Submodule SHAs are close to useless for answering "what code ran". On this cluster all
+# eight submodules are uninitialised, ``modules/mentos`` is empty, and the MENTOS that
+# actually runs is an editable install from an external checkout at an entirely different
+# commit. The authoritative answer lives in the venv.
+#
+# ``dist-info/direct_url.json`` is written only for distributions installed from a path or
+# URL rather than from an index (PEP 610) — which is exactly the set of vendored and
+# editable model packages. So it selects the interesting ones without a hardcoded list
+# that would need maintaining every time a model is added.
+
+_VENV_PROBE = r"""
+import json, sys
+from importlib.metadata import distributions
+out = {}
+for dist in distributions():
+    try:
+        name = dist.metadata["Name"]
+    except Exception:
+        continue
+    if not name:
+        continue
+    rec = {"version": dist.version}
+    try:
+        raw = dist.read_text("direct_url.json")
+    except Exception:
+        raw = None
+    if raw:
+        try:
+            du = json.loads(raw)
+            rec["url"] = du.get("url")
+            rec["editable"] = bool((du.get("dir_info") or {}).get("editable"))
+        except Exception:
+            pass
+    out[name] = rec
+json.dump({"python": sys.version.split()[0], "packages": out}, sys.stdout)
+"""
+
+
+def venv_packages(env, local_only: bool = True) -> dict:
+    """Interrogate a model's venv for what it has installed, and where that came from.
+
+    With ``local_only`` (the default) only distributions carrying a ``direct_url.json``
+    are kept — the vendored and editable packages, i.e. the model code — each resolved to
+    its source path and that path's git state. ``torch`` is always kept regardless, since
+    its build determines numerics.
+
+    Returns ``{"error": ...}`` rather than raising when the venv is missing or unreadable.
+    A benchmark must never fail because provenance could not look something up.
+    """
+    python = Path(env) / "bin" / "python"
+    if not python.exists():
+        return {"error": f"no python at {python}"}
+    try:
+        out = subprocess.run([str(python), "-c", _VENV_PROBE], capture_output=True,
+                             text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    if out.returncode != 0:
+        return {"error": f"probe failed (rc={out.returncode}): {out.stderr.strip()[:300]}"}
+    try:
+        probe = json.loads(out.stdout)
+    except json.JSONDecodeError as e:
+        return {"error": f"unparseable probe output: {e}"}
+
+    packages = probe.get("packages", {})
+    keep: dict[str, dict] = {}
+    for name, rec in packages.items():
+        url = rec.get("url")
+        if local_only and not url:
+            continue
+        entry = dict(rec)
+        if url and url.startswith("file://"):
+            src = Path(url[len("file://"):])
+            entry["source_path"] = str(src)
+            entry["git"] = git_state(src)
+        keep[name] = entry
+    if "torch" in packages and "torch" not in keep:
+        keep["torch"] = dict(packages["torch"])
+    return {"python": probe.get("python"), "packages": keep}

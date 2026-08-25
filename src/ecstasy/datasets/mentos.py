@@ -39,6 +39,12 @@ class MentosSquareDataset(Dataset):
     def source_paths(self) -> dict[str, Path]:
         return {"index": self.index, "gt_root": self.gt_root}
 
+    def gt_path(self, entry_id: str) -> Path:
+        return self.gt_root / entry_id[:2] / f"{entry_id}.pt"
+
+    def has_gt(self, entry_id: str) -> bool:
+        return self.gt_path(entry_id).exists()
+
     @staticmethod
     def _swap_perm(la: int, L: int) -> np.ndarray:
         # new concat order = chainB (orig [la:L)) then chainA (orig [0:la))
@@ -64,8 +70,7 @@ class MentosSquareDataset(Dataset):
         # /home/.../mentos), so torch.load resolves the class natively — no rename
         # shim. (Lazy torch import: only a scoring env reaches here, never the
         # torch-less orchestrator. See the mentos_package_and_venvs memory.)
-        p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
-        sample = torch.load(p, weights_only=False, map_location="cpu")
+        sample = torch.load(self.gt_path(entry_id), weights_only=False, map_location="cpu")
         # bin < contact_bin == contact; -1 (unresolved) must NOT count as contact.
         raw = sample.contact_map.numpy()
         contact_map = (raw >= 0) & (raw < self.contact_bin)

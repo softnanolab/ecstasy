@@ -70,7 +70,8 @@ class Ecstasy:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
-            profile=False, checkpoint=None, shard=None):
+            profile=False, checkpoint=None, shard=None, force=False,
+            allow_partial=False):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
         --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
@@ -80,15 +81,20 @@ class Ecstasy:
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
         --shard 'i/N' processes only every N-th entry (offset i) for parallel jobs;
         combined with the contact.npz skip the shards never collide and are resumable.
+        --force recomputes when the prediction inputs changed (model code, weights,
+        params, dataset index). Without it such a run is REFUSED, because reusing the
+        cached predictions would mix outputs from two code versions into one result
+        that looks entirely normal.
+        --allow_partial permits a headline mean over an incomplete set of targets.
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
-            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard)
+            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard, force=force)
             if not no_score:
-                pipeline.run_score(r, limit=limit)
+                pipeline.run_score(r, limit=limit, allow_partial=allow_partial)
 
     def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None,
-              metrics=None):
+              metrics=None, allow_partial=False):
         """Score existing predictions over the dataset×model matrix.
 
         --metrics 'P@K,P@K(tol=2)' selects registered metrics by name; see
@@ -96,7 +102,8 @@ class Ecstasy:
         registry never silently changes a headline number.
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
-            pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None)
+            pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None,
+                               allow_partial=allow_partial)
 
     def metrics(self, kind=None, json_out=False):
         """List registered metrics — the reusable set available to any run or plot."""

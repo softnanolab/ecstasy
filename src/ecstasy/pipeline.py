@@ -68,6 +68,56 @@ class Run:
             "infra": self.model.infra,
         }, indent=1, default=str))
 
+    @property
+    def prediction_fp_path(self) -> Path:
+        return self.out_dir / "prediction_fingerprint.json"
+
+    @property
+    def scoring_fp_path(self) -> Path:
+        return self.out_dir / "scoring_fingerprint.json"
+
+    def check_prediction_fingerprint(self, force: bool = False) -> dict:
+        """Refuse to reuse a run directory whose predictions came from different inputs.
+
+        This is what makes the ``contact.npz`` skip safe. Without it, bumping a
+        dependency silently mixes old predictions into a new run — the persisted version
+        of the same hazard as editing ``src/`` mid-sweep.
+
+        ``force`` recomputes in place and re-stamps the fingerprint; it is the deliberate
+        escape hatch, never the default.
+        """
+        from ecstasy import fingerprint as fp
+
+        current = fp.make("prediction", fp.prediction_inputs(self.model, self.dataset))
+        previous = fp.load(self.prediction_fp_path)
+        if previous and previous.get("digest") != current["digest"]:
+            diffs = fp.compare(previous, current)
+            if not force:
+                raise fp.FingerprintMismatch("prediction", diffs, self.out_dir)
+            print(f"[force] prediction inputs changed ({len(diffs)} difference(s)); "
+                  f"recomputing in place")
+            for d in diffs[:8]:
+                print(f"    {d}")
+            # Stale predictions must go, or --force would silently keep exactly the
+            # mixture it was invoked to resolve.
+            for old in self.predictions_dir.glob("*/contact.npz"):
+                old.unlink()
+        fp.save(self.prediction_fp_path, current)
+        return current
+
+    def check_scoring_fingerprint(self, metrics) -> dict:
+        """Record what the scores were computed from. Scoring is cheap, so a change here
+        never blocks — it simply re-scores and re-stamps."""
+        from ecstasy import fingerprint as fp
+
+        current = fp.make("scoring", fp.scoring_inputs(self.dataset, metrics))
+        previous = fp.load(self.scoring_fp_path)
+        if previous and previous.get("digest") != current["digest"]:
+            print(f"[rescore] scoring inputs changed: "
+                  f"{'; '.join(fp.compare(previous, current)[:4])}")
+        fp.save(self.scoring_fp_path, current)
+        return current
+
     def write_provenance(self) -> dict:
         """Record which code and which bytes produced this run.
 
@@ -79,7 +129,7 @@ class Run:
         """
         from ecstasy import provenance
 
-        rec = provenance.capture(params=self.model.params)
+        rec = provenance.capture(params=self.model.params, env=self.model.env)
         rec["dataset"] = {**self.dataset.manifest(), "fingerprint": self.dataset.fingerprint()}
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.provenance_path.write_text(json.dumps(rec, indent=1, default=str))
@@ -93,7 +143,11 @@ def make_run(dataset: str, model: str, preset: str | None = None,
 
 
 def run_predict(run: Run, limit: int | None = None, profile: bool = False,
-                shard: str | None = None) -> None:
+                shard: str | None = None, force: bool = False) -> None:
+    # Gate BEFORE anything is written. The cached-prediction skip below is only safe if
+    # the cache was produced by the same inputs; otherwise this run would reuse old
+    # predictions under a new provenance record and look entirely normal.
+    run.check_prediction_fingerprint(force=force)
     run.write_params()
     prov = run.write_provenance()
     from ecstasy import provenance as _prov
@@ -133,8 +187,10 @@ def run_predict(run: Run, limit: int | None = None, profile: bool = False,
 
 
 def run_score(run: Run, limit: int | None = None,
-              metrics: tuple[str, ...] | None = None) -> None:
+              metrics: tuple[str, ...] | None = None,
+              allow_partial: bool = False) -> None:
     metrics = tuple(metrics) if metrics else DEFAULT_CONTACT_METRICS
+    scoring_fp = run.check_scoring_fingerprint(metrics)
     per_protein: dict[str, dict] = {}
     skipped: list[tuple[str, str]] = []
     errors: list[tuple[str, str]] = []
@@ -162,14 +218,43 @@ def run_score(run: Run, limit: int | None = None,
         else:
             per_protein[entry.id] = {k: float(v) for k, v in res.items()}
 
+    # Coverage is scoped to what was actually asked for: with --limit N the run only ever
+    # intended N targets, so completeness is measured against that, not the whole split.
+    n_intended = int(limit) if limit is not None else run.dataset.coverage()["n_entries"]
+    covered = len(per_protein) / n_intended if n_intended else 0.0
+    complete = len(per_protein) == n_intended
+
     aggregate: dict = {
         "dataset": run.dataset.name, "model": run.model.name, "variant": run.model.variant,
         "metrics": list(metrics),
+        "scoring_fingerprint": scoring_fp["digest"],
+        "prediction_fingerprint": (fingerprint_load(run) or {}).get("digest"),
+        "coverage": {"n_evaluated": len(per_protein), "n_intended": n_intended,
+                     "fraction": covered, "complete": complete,
+                     "limit": limit},
         "summary": {"n_evaluated": len(per_protein), "n_skipped": len(skipped),
                     "n_errors": len(errors)},
         "per_protein": per_protein,
         "skipped_first_20": skipped[:20], "errors_first_20": errors[:20],
     }
+    if not complete and not allow_partial:
+        # A mean over 8% of a split prints identically to a mean over all of it. Refusing
+        # to compute the headline is the only reliable way to stop that being quoted; the
+        # per-protein numbers are still written, so nothing is lost.
+        aggregate["summary"]["partial"] = True
+        aggregate["summary"]["partial_reason"] = (
+            f"scored {len(per_protein)}/{n_intended} targets ({covered:.1%}). No headline "
+            f"mean was computed. Re-run with allow_partial=True to publish it as partial, "
+            f"or supply the missing predictions/ground truth.")
+        run.out_dir.mkdir(parents=True, exist_ok=True)
+        run.result_path.write_text(json.dumps(aggregate, indent=1))
+        print(f"[partial] {aggregate['summary']['partial_reason']}")
+        print(f"result -> {run.result_path}")
+        return
+    if not complete:
+        aggregate["summary"]["partial"] = True
+        print(f"[warn] partial result accepted: {len(per_protein)}/{n_intended} "
+              f"({covered:.1%}) — summary means are over the scored subset only")
     # Provenance travels WITH the result, not only beside it. A result.json that outlives
     # its run directory still names the code and the split that produced it.
     if run.provenance_path.exists():
@@ -196,6 +281,12 @@ def run_score(run: Run, limit: int | None = None,
               f"n={s['n_evaluated']} {headline} "
               f"skipped={s['n_skipped']} errors={s['n_errors']}")
     print(f"result -> {run.result_path}")
+
+
+def fingerprint_load(run: Run) -> dict | None:
+    """The prediction fingerprint stamped on this run, if it has one."""
+    from ecstasy import fingerprint as fp
+    return fp.load(run.prediction_fp_path)
 
 
 def flops_summary(run_dir: Path) -> dict | None:
