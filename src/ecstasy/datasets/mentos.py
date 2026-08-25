@@ -14,8 +14,6 @@ from typing import Iterable
 import numpy as np
 
 from ecstasy.datasets.base import Dataset, Entry
-from ecstasy.metrics import DEFAULT_CONTACT_METRICS, ContactEval
-from ecstasy.metrics import registry as metric_registry
 
 
 class MentosSquareDataset(Dataset):
@@ -84,35 +82,5 @@ class MentosSquareDataset(Dataset):
             contact_map = contact_map[np.ix_(perm, perm)]
             valid = valid[np.ix_(perm, perm)]
             seqs = [seqs[1], seqs[0]]
-        return {"contact_map": contact_map, "valid": valid, "sequences": seqs}
-
-    def score(self, entry: Entry, contact_path: Path,
-              metrics: tuple[str, ...] | None = None) -> dict[str, float]:
-        """Score one prediction against this split's GT.
-
-        `metrics` names registered contact metrics (see `ecstasy.metrics.registry`).
-        Defaulting to `DEFAULT_CONTACT_METRICS` keeps the reported set identical to what
-        ecstasy produced before metrics were selectable, so adding a metric to the
-        registry can never silently change a headline number.
-        """
-        d = np.load(contact_path)
-        probs = np.asarray(d["probs"], dtype=np.float32)
-        gt = self.gt_for(entry.id)
-        contact_gt = gt["contact_map"]
-        valid = gt["valid"]
-        seqs = gt["sequences"]
-        if len(seqs) != 2:
-            return {"_skipped": "non-dimer"}
-        la, lb = len(seqs[0]), len(seqs[1])
-        L = la + lb
-        if probs.shape[0] != L or contact_gt.shape[0] != L:
-            return {"_error": f"shape mismatch: probs={probs.shape}, gt={contact_gt.shape}, L={L}"}
-
-        ev = ContactEval(probs=probs, gt=contact_gt, valid=valid, chain_lengths=(la, lb))
-        out = metric_registry.compute(metrics or DEFAULT_CONTACT_METRICS, ev)
-        # K (the number of true defined inter contacts) is not a metric — it is the
-        # denominator every P@K is taken over, and it is what tells you whether a target
-        # had enough signal to be scored at all.
-        cp, gti, vi = ev.inter_block()
-        out["K"] = float(int((gti & vi).sum()))
-        return out
+        return {"contact_map": contact_map, "valid": valid, "sequences": seqs,
+                "is_homodimer": sample.is_homodimer}

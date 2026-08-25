@@ -145,17 +145,11 @@ def _bundle(chain_sizes=(4, 3), ca_present=True):
             "residue_index": np.concatenate([np.arange(s) for s in chain_sizes])}
 
 
-class _Ev:
-    """Minimal stand-in; per_chain_quality only needs pred/native."""
-    KIND = "structure"
-
-    def __init__(self, pred, native):
-        self.pred, self.native = pred, native
-
-
 class TestPerChainQuality:
+    """Takes two bundles, not an eval input — so it is testable without constructing one."""
+
     def test_a_perfect_prediction_scores_one_per_chain(self):
-        got = per_chain_quality(_Ev(_bundle(), _bundle()))
+        got = per_chain_quality(_bundle(), _bundle())
         assert [c["chain"] for c in got] == [0, 1]
         assert all(c["TM"] == pytest.approx(1.0, abs=1e-6) for c in got)
 
@@ -164,19 +158,31 @@ class TestPerChainQuality:
         that separation is the entire reason these run beside DockQ."""
         pred = _bundle()
         pred["atom37_positions"][4:, CA_INDEX] += np.array([100.0, 100.0, 100.0])
-        got = per_chain_quality(_Ev(pred, _bundle()))
+        got = per_chain_quality(pred, _bundle())
         assert all(c["TM"] == pytest.approx(1.0, abs=1e-6) for c in got)
 
     def test_length_mismatch_is_flagged_not_scored(self):
-        got = per_chain_quality(_Ev(_bundle((4, 2)), _bundle((4, 3))))
+        got = per_chain_quality(_bundle((4, 2)), _bundle((4, 3)))
         bad = [c for c in got if c["chain"] == 1][0]
         assert bad["n"] == 0 and "length mismatch" in bad["_note"]
         assert np.isnan(bad["TM"])
 
     def test_no_shared_ca_is_flagged(self):
-        got = per_chain_quality(_Ev(_bundle(ca_present=False), _bundle()))
+        got = per_chain_quality(_bundle(ca_present=False), _bundle())
         assert all(c["_note"] == "no shared CA" for c in got)
 
-    def test_result_is_memoised(self):
-        ev = _Ev(_bundle(), _bundle())
-        assert per_chain_quality(ev) is per_chain_quality(ev)
+
+class TestEvalCaching:
+    """Caching lives on the eval input, not poked in from a metric module."""
+
+    def test_per_chain_is_computed_once(self):
+        from ecstasy.metrics import StructureEval
+        ev = StructureEval(pred=_bundle(), native=_bundle())
+        assert ev.per_chain() is ev.per_chain()
+
+    def test_cache_is_kept_out_of_repr(self):
+        """A debug print should not be a wall of cached numbers."""
+        from ecstasy.metrics import StructureEval
+        ev = StructureEval(pred=_bundle(), native=_bundle())
+        ev.per_chain()
+        assert "_per_chain" not in repr(ev)

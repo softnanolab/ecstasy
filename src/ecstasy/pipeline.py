@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ecstasy import fingerprint as fp
 from ecstasy.config import settings
 from ecstasy.datasets import Dataset, load_dataset
 from ecstasy.metrics import DEFAULT_CONTACT_METRICS
@@ -86,8 +87,6 @@ class Run:
         ``force`` recomputes in place and re-stamps the fingerprint; it is the deliberate
         escape hatch, never the default.
         """
-        from ecstasy import fingerprint as fp
-
         current = fp.make("prediction", fp.prediction_inputs(self.model, self.dataset))
         previous = fp.load(self.prediction_fp_path)
         if previous and previous.get("digest") != current["digest"]:
@@ -108,8 +107,6 @@ class Run:
     def check_scoring_fingerprint(self, metrics) -> dict:
         """Record what the scores were computed from. Scoring is cheap, so a change here
         never blocks — it simply re-scores and re-stamps."""
-        from ecstasy import fingerprint as fp
-
         current = fp.make("scoring", fp.scoring_inputs(self.dataset, metrics))
         previous = fp.load(self.scoring_fp_path)
         if previous and previous.get("digest") != current["digest"]:
@@ -228,7 +225,7 @@ def run_score(run: Run, limit: int | None = None,
         "dataset": run.dataset.name, "model": run.model.name, "variant": run.model.variant,
         "metrics": list(metrics),
         "scoring_fingerprint": scoring_fp["digest"],
-        "prediction_fingerprint": (fingerprint_load(run) or {}).get("digest"),
+        "prediction_fingerprint": (fp.load(run.prediction_fp_path) or {}).get("digest"),
         "coverage": {"n_evaluated": len(per_protein), "n_intended": n_intended,
                      "fraction": covered, "complete": complete,
                      "limit": limit},
@@ -237,56 +234,58 @@ def run_score(run: Run, limit: int | None = None,
         "per_protein": per_protein,
         "skipped_first_20": skipped[:20], "errors_first_20": errors[:20],
     }
-    if not complete and not allow_partial:
-        # A mean over 8% of a split prints identically to a mean over all of it. Refusing
-        # to compute the headline is the only reliable way to stop that being quoted; the
-        # per-protein numbers are still written, so nothing is lost.
+    # Provenance travels WITH the result, not only beside it. A result.json that outlives
+    # its run directory still names the code and the split that produced it.
+    aggregate["provenance"] = (json.loads(run.provenance_path.read_text())
+                               if run.provenance_path.exists() else run.write_provenance())
+
+    # The ONLY thing partial-ness changes is whether a headline mean is computed. A mean
+    # over 8% of a split prints identically to a mean over all of it, so withholding it is
+    # the one reliable way to stop it being quoted — but the per-protein numbers are
+    # written either way, so nothing is lost by refusing.
+    if not complete:
         aggregate["summary"]["partial"] = True
+    if per_protein and (complete or allow_partial):
+        aggregate["summary"].update(_summarise(per_protein, metrics))
+    elif not complete:
         aggregate["summary"]["partial_reason"] = (
             f"scored {len(per_protein)}/{n_intended} targets ({covered:.1%}). No headline "
             f"mean was computed. Re-run with allow_partial=True to publish it as partial, "
             f"or supply the missing predictions/ground truth.")
-        run.out_dir.mkdir(parents=True, exist_ok=True)
-        run.result_path.write_text(json.dumps(aggregate, indent=1))
-        print(f"[partial] {aggregate['summary']['partial_reason']}")
-        print(f"result -> {run.result_path}")
-        return
-    if not complete:
-        aggregate["summary"]["partial"] = True
-        print(f"[warn] partial result accepted: {len(per_protein)}/{n_intended} "
-              f"({covered:.1%}) — summary means are over the scored subset only")
-    # Provenance travels WITH the result, not only beside it. A result.json that outlives
-    # its run directory still names the code and the split that produced it.
-    if run.provenance_path.exists():
-        aggregate["provenance"] = json.loads(run.provenance_path.read_text())
-    else:
-        aggregate["provenance"] = run.write_provenance()
-    if per_protein:
-        # Aggregate whatever was actually computed, rather than a fixed key list — that is
-        # what lets a run request P@K(tol=2) and have it summarised without a code change.
-        keys = [k for k in metrics if any(k in v for v in per_protein.values())]
-        arrs = {k: np.array([v[k] for v in per_protein.values()
-                             if not np.isnan(v.get(k, np.nan))]) for k in keys}
-        aggregate["summary"]["mean"] = {k: float(arrs[k].mean()) if arrs[k].size else float("nan")
-                                        for k in keys}
-        aggregate["summary"]["median"] = {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
-                                          for k in keys}
 
     run.out_dir.mkdir(parents=True, exist_ok=True)
     run.result_path.write_text(json.dumps(aggregate, indent=1))
+    _print_result(run, aggregate)
+
+
+def _summarise(per_protein: dict[str, dict], metrics: tuple[str, ...]) -> dict:
+    """Mean and median over whatever was actually computed.
+
+    Keyed off the requested metrics rather than a fixed list, which is what lets a run ask
+    for P@K(tol=2) and have it summarised without a code change.
+    """
+    keys = [k for k in metrics if any(k in v for v in per_protein.values())]
+    arrs = {k: np.array([v[k] for v in per_protein.values()
+                         if not np.isnan(v.get(k, np.nan))]) for k in keys}
+    return {
+        "mean": {k: float(arrs[k].mean()) if arrs[k].size else float("nan") for k in keys},
+        "median": {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
+                   for k in keys},
+    }
+
+
+def _print_result(run: Run, aggregate: dict) -> None:
     s = aggregate["summary"]
     if "mean" in s:
         headline = " ".join(f"{k}={s['mean'][k]:.3f}" for k in list(s["mean"])[:4])
         print(f"[{run.dataset.name}/{run.model.name}/{run.model.variant}] "
               f"n={s['n_evaluated']} {headline} "
               f"skipped={s['n_skipped']} errors={s['n_errors']}")
+    if s.get("partial_reason"):
+        print(f"[partial] {s['partial_reason']}")
+    elif s.get("partial"):
+        print(f"[warn] partial result accepted — means are over the scored subset only")
     print(f"result -> {run.result_path}")
-
-
-def fingerprint_load(run: Run) -> dict | None:
-    """The prediction fingerprint stamped on this run, if it has one."""
-    from ecstasy import fingerprint as fp
-    return fp.load(run.prediction_fp_path)
 
 
 def flops_summary(run_dir: Path) -> dict | None:

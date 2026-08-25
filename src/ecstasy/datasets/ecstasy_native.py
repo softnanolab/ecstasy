@@ -14,13 +14,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-import numpy as np
 import yaml
 
 from ecstasy.datasets import store
 from ecstasy.datasets.base import Dataset, Entry
-from ecstasy.metrics import DEFAULT_CONTACT_METRICS, ContactEval
-from ecstasy.metrics import registry as metric_registry
 
 
 class EcstasyDataset(Dataset):
@@ -90,25 +87,3 @@ class EcstasyDataset(Dataset):
         gt = self.gt_for(entry_id)
         return {k: gt[k] for k in ("atom37_positions", "atom37_mask", "aatype",
                                    "asym_id", "residue_index")}
-
-    def score(self, entry: Entry, contact_path: Path,
-              metrics: tuple[str, ...] | None = None) -> dict[str, float]:
-        d = np.load(contact_path)
-        probs = np.asarray(d["probs"], dtype=np.float32)
-        gt = self.gt_for(entry.id)
-        seqs = gt["sequences"]
-        if len(seqs) != 2:
-            return {"_skipped": "non-dimer"}
-        la, lb = len(seqs[0]), len(seqs[1])
-        L = la + lb
-        if probs.shape[0] != L or gt["contact_map"].shape[0] != L:
-            return {"_error": f"shape mismatch: probs={probs.shape}, "
-                              f"gt={gt['contact_map'].shape}, L={L}"}
-        ev = ContactEval(probs=probs, gt=gt["contact_map"], valid=gt["valid"],
-                         chain_lengths=(la, lb))
-        out = metric_registry.compute(metrics or DEFAULT_CONTACT_METRICS, ev)
-        cp, gti, vi = ev.inter_block()
-        out["K"] = float(int((gti & vi).sum()))
-        if gt.get("is_homodimer") is not None:
-            out["is_homodimer"] = float(bool(gt["is_homodimer"]))
-        return out

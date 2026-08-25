@@ -12,12 +12,15 @@ across every metric in a scoring pass.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 
-@dataclass(frozen=True)
+# eq=False on both eval inputs: they hold numpy arrays, so a generated __eq__ raises
+# "truth value of an array is ambiguous", and with frozen=True the generated __hash__
+# would raise too. Identity comparison is the only sane semantics here.
+@dataclass(frozen=True, eq=False)
 class ContactEval:
     """A predicted (L, L) contact-probability map with its ground truth.
 
@@ -69,12 +72,18 @@ class ContactEval:
                 np.asarray(self.valid)[:la, la:].astype(bool))
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class StructureEval:
     """A predicted structure and its native, as atom37 bundles.
 
-    Kept deliberately thin: DockQ is an external CLI that takes two PDB paths, so the
-    rendered paths travel with the arrays rather than being re-rendered per metric.
+    DockQ is an external CLI taking two PDB paths, so the rendered paths travel with the
+    arrays rather than being re-rendered per metric.
+
+    **Derived quantities are cached here, on the input they derive from.** Seven metrics
+    are registered against a structure and four of them read the same DockQ run; without
+    a cache, addressing them individually would invoke the binary four times. Putting the
+    cache on the struct — rather than having metric functions reach in and set attributes
+    on it — keeps the ownership obvious and lets the metric adapters be one-liners.
     """
 
     KIND = "structure"
@@ -84,3 +93,21 @@ class StructureEval:
     pred_pdb: object = None      # Path, rendered once and shared across metrics
     native_pdb: object = None    # Path
     entry_id: str = ""
+
+    #: Lazily filled; kept out of repr so a debug print is not a wall of cached numbers.
+    _dockq: dict | None = field(default=None, repr=False)
+    _per_chain: list | None = field(default=None, repr=False)
+
+    def dockq(self) -> dict[str, float]:
+        """All DockQ components, from a single invocation of the binary."""
+        if self._dockq is None:
+            from ecstasy.metrics.structure import run_dockq
+            self._dockq = run_dockq(self.pred_pdb, self.native_pdb) or {}
+        return self._dockq
+
+    def per_chain(self) -> list[dict]:
+        """Per-chain fold quality, each chain superposed independently."""
+        if self._per_chain is None:
+            from ecstasy.metrics.structure import per_chain_quality
+            self._per_chain = per_chain_quality(self.pred, self.native)
+        return self._per_chain

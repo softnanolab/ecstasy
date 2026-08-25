@@ -69,18 +69,9 @@ def run_dockq(model_pdb: Path, native_pdb: Path,
     return scores or None
 
 
-def _dockq_components(ev) -> dict[str, float]:
-    """All DockQ components from ONE subprocess, memoised on the eval input."""
-    cached = getattr(ev, "_dockq_cache", None)
-    if cached is None:
-        cached = run_dockq(ev.pred_pdb, ev.native_pdb) or {}
-        object.__setattr__(ev, "_dockq_cache", cached)
-    return cached
-
-
 def dockq_component(ev, key: str) -> float:
-    """Registry adapter: one named DockQ component."""
-    return float(_dockq_components(ev).get(key, float("nan")))
+    """Registry adapter: one named DockQ component. Caching lives on `ev`."""
+    return float(ev.dockq().get(key, float("nan")))
 
 
 # --- monomer fold quality -------------------------------------------------------------
@@ -117,17 +108,16 @@ def ca_rmsd(mobile: np.ndarray, target: np.ndarray) -> float:
     return float(np.sqrt((d ** 2).sum(axis=1).mean()))
 
 
-def per_chain_quality(ev) -> list[dict]:
-    """Fold quality per chain, each superposed independently and memoised.
+def per_chain_quality(pred: dict, native: dict) -> list[dict]:
+    """Fold quality per chain, each superposed independently.
 
     Superposing each chain on its own is the point: chains that folded well but docked
     badly is a completely different result from chains that never folded, and DockQ
     alone cannot distinguish them.
+
+    Takes the two bundles rather than an eval input, so it is usable (and testable)
+    without constructing one. Caching is the caller's business — see `StructureEval`.
     """
-    cached = getattr(ev, "_chain_cache", None)
-    if cached is not None:
-        return cached
-    pred, native = ev.pred, ev.native
     p_asym, n_asym = np.asarray(pred["asym_id"]), np.asarray(native["asym_id"])
     out: list[dict] = []
     for chain in sorted(set(n_asym.tolist())):
@@ -151,12 +141,12 @@ def per_chain_quality(ev) -> list[dict]:
         nc = np.asarray(native["atom37_positions"])[ni[keep], CA_INDEX]
         out.append({"chain": int(chain), "n": int(keep.sum()),
                     "TM": tm_score(pc, nc), "CA_RMSD": ca_rmsd(pc, nc)})
-    object.__setattr__(ev, "_chain_cache", out)
     return out
 
 
 def _chain_stat(ev, key: str, how: str) -> float:
-    vals = [c[key] for c in per_chain_quality(ev) if c[key] == c[key]]
+    """Registry adapter: one summary statistic over the per-chain table."""
+    vals = [c[key] for c in ev.per_chain() if c[key] == c[key]]
     if not vals:
         return float("nan")
     return float({"mean": np.mean, "min": np.min, "max": np.max}[how](vals))

@@ -69,9 +69,48 @@ class Dataset(ABC):
     @abstractmethod
     def gt_for(self, entry_id: str) -> dict: ...
 
-    @abstractmethod
     def score(self, entry: Entry, contact_path: Path,
-              metrics: tuple[str, ...] | None = None) -> dict[str, float]: ...
+              metrics: tuple[str, ...] | None = None) -> dict[str, float]:
+        """Score one prediction against this dataset's ground truth.
+
+        Concrete, not abstract: scoring is a pure function of what ``gt_for`` returns and
+        the predicted map, so every loader would otherwise reimplement it identically.
+        A loader supplies ``gt_for``; this supplies the rest.
+
+        `metrics` names registered contact metrics. Defaulting to
+        ``DEFAULT_CONTACT_METRICS`` keeps the reported set identical to what ecstasy
+        produced before metrics were selectable, so adding a metric to the registry can
+        never silently change a headline number.
+        """
+        import numpy as np
+
+        from ecstasy.metrics import DEFAULT_CONTACT_METRICS, ContactEval
+        from ecstasy.metrics import registry as metric_registry
+
+        probs = np.asarray(np.load(contact_path)["probs"], dtype=np.float32)
+        gt = self.gt_for(entry.id)
+        seqs = gt["sequences"]
+        if len(seqs) != 2:
+            return {"_skipped": "non-dimer"}
+        la, lb = len(seqs[0]), len(seqs[1])
+        L = la + lb
+        if probs.shape[0] != L or gt["contact_map"].shape[0] != L:
+            return {"_error": f"shape mismatch: probs={probs.shape}, "
+                              f"gt={gt['contact_map'].shape}, L={L}"}
+
+        ev = ContactEval(probs=probs, gt=gt["contact_map"], valid=gt["valid"],
+                         chain_lengths=(la, lb))
+        out = metric_registry.compute(metrics or DEFAULT_CONTACT_METRICS, ev)
+        # K is not a metric — it is the denominator every P@K is taken over, and it says
+        # whether a target had enough signal to be scored at all.
+        _, gti, vi = ev.inter_block()
+        out["K"] = float(int((gti & vi).sum()))
+        if gt.get("is_homodimer") is not None:
+            # Reported wherever the GT knows it: under a poly-G linker hack a homodimer
+            # is one sequence duplicated around a glycine run, and pooling the two hides
+            # a failure mode that belongs to the hack rather than to the model.
+            out["is_homodimer"] = float(bool(gt["is_homodimer"]))
+        return out
 
     # --- identity -------------------------------------------------------------------
 
