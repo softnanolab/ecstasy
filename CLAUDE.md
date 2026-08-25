@@ -46,6 +46,39 @@ Before changing anything MSA-related, read **`src/ecstasy/msa/README.md`** (the 
 model→pipeline map, the differences table, exact `ecstasy msa …` commands, and the
 colabfold-local pin). Store keys are order-dependent (`pair_hash`).
 
+## DockQ: never read it without iRMSD, and never trust an early checkpoint
+
+DockQ averages fnat with two RMSD terms. When nothing is actually docked, both RMSD terms
+give near-zero credit and **fnat carries the score** — so a model that has docked nothing
+lands on a non-trivial DockQ, and lands *highest* exactly where its geometry is worst.
+
+This is not theoretical. In one MENTOS-vs-MiniFold campaign it produced four wrong
+conclusions before it was caught:
+
+1. a comparison run against MENTOS step 2000 (iRMSD 21.2 Å) instead of the converged model
+2. "MENTOS never clears medium" — true only of steps 2000-12000
+3. a median inversion that was an artefact of step 2000 being the best-median checkpoint
+4. "on a typical target the two are indistinguishable" — true at steps 2000/4000, false
+   against the other 21 checkpoints
+
+Verified per-target head-to-head vs MiniFold, full 151 each:
+
+| MENTOS checkpoint | MENTOS wins | MiniFold wins | MENTOS iRMSD |
+|---|---|---|---|
+| 4000 | 75 | 76 | 21.38 Å |
+| 14000 | 58 | 89 | 13.13 Å |
+| 22000 | 59 | 87 | 13.99 Å |
+| 50000 | 57 | 92 | 13.71 Å |
+
+MENTOS looks competitive precisely where its interfaces are worst. **Rules:** report iRMSD
+and LRMSD beside every DockQ; never lead on median (the statistic most corrupted by the
+fnat floor); and treat any early-checkpoint DockQ as suspect until its iRMSD is checked.
+
+Related: selecting the best of N checkpoints **on the evaluation set** is test-set
+selection. Such a number is an upper bound on that model, not its performance, and makes
+the opposing model's margin a lower bound. Say which, and name the selection criterion —
+"best checkpoint" means six different checkpoints depending on the metric.
+
 ## Provenance — a result names the code that produced it
 
 Every run writes `provenance.json` beside `result.json`, and the record is embedded in
