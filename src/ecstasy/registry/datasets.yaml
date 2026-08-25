@@ -1,10 +1,20 @@
 # Evaluation datasets (interchain contact prediction). Rows, not classes.
 # ${VAR} expands against ecstasy.config.Settings (DATA_ROOT/MENTOS_ROOT/...).
-#   kind        loader class (mentos_square)
-#   index       split index parquet (has a `split` column + `sequences`)
-#   gt_root     per-entry ground-truth root (<gt_root>/<id[:2]>/<id>.pt)
-#   split       which split column value to evaluate (mentos_square)
-#   contact_bin Cβ-Cβ distance-bin threshold; bins < contact_bin are contacts
+#   kind              loader class (mentos_square)
+#   index             split index parquet (has a `split` column + `sequences`)
+#   gt_root           per-entry ground-truth root (<gt_root>/<id[:2]>/<id>.pt)
+#   split             which split column value to evaluate (mentos_square)
+#   contact_bin       Cβ-Cβ distance-bin threshold; bins < contact_bin are contacts
+#
+# Identity — required on every row, and checked by `ecstasy datasets verify`:
+#   version           bump when the underlying split changes in a way that moves numbers
+#   description       what this split is and why it exists; agents read this
+#   expected_entries  row count. A split is a file that nothing stops from changing
+#                     under a published result, so the count is asserted, not commented.
+#                     The counts below were MEASURED, not copied from the old comments —
+#                     those had already drifted (they claimed 98 / 474 for the pinder
+#                     splits, which actually hold 106 / 454).
+#   tags              free-form labels for filtering
 
 _mentos: &mentos
   kind: mentos_square
@@ -15,19 +25,38 @@ _mentos: &mentos
   # far stricter, non-comparable GT (degenerate median P@K=0). Verified identical to
   # mentos.metrics.contact_prediction.metrics_inter_chain at bin 19.
   contact_bin: 19
+  version: 1
 
 # MENTOS seq_id_30 val (legacy headline; 1,511 dimers)
 mentos_seqid30:
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/seq_id_30/index.parquet
+  description: >-
+    Legacy headline split: MMseqs clustering at 30% sequence identity. Superseded by the
+    four leakage-controlled val splits below; kept so older results stay reproducible.
+    NOTE: the seq_id_30 directory is absent on CX3, so this row is currently unresolvable
+    there — `ecstasy datasets verify` will say so rather than failing mid-run.
+  expected_entries: 1511
+  tags: [legacy, contact]
 
-# Four leakage-controlled val splits (deleaking strategy in the comment)
-val_seq_chain:      # V1 MMseqs cluster @ 30% seq id, chain-level   (631)
+# Four leakage-controlled val splits (deleaking strategy in the description)
+val_seq_chain:
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_chain/index.parquet
-val_seq_pair:       # V2 MMseqs cluster, pair identity              (945)
+  description: >-
+    V1 deleaking: MMseqs cluster at 30% sequence identity, chain-level. A dimer is held
+    out if either chain clusters with a training chain.
+  expected_entries: 632
+  tags: [deleaked, contact]
+
+val_seq_pair:
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
+  description: >-
+    V2 deleaking: MMseqs cluster, pair identity. Held out on the (chainA, chainB) pair
+    rather than either chain alone, so it is more permissive than val_seq_chain.
+  expected_entries: 930
+  tags: [deleaked, contact]
 
 # Chain-order-permutation experiment: val_seq_pair with each dimer's chains flipped
 # (A,B)->(B,A), GT reindexed to match. ISOLATED (own run dir + own pair-hash MSAs, so
@@ -36,10 +65,27 @@ val_seq_pair_swapped:
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
   swap_chains: true
+  description: >-
+    val_seq_pair with every dimer's chain order flipped (A,B)->(B,A) and the square GT
+    reindexed to match. Measures how order-dependent a model is; a model that truly reads
+    a complex should score the same here as on val_seq_pair.
+  expected_entries: 930
+  tags: [deleaked, contact, ablation]
 
-val_pinder_chain:   # V3 depth-2 walk, fused interface-monomer graph (98)
+val_pinder_chain:
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_chain/index.parquet
-val_pinder_pair:    # V4 LPA pair identity — headline               (474)
+  description: >-
+    V3 deleaking: Pinder-style depth-2 walk over a fused interface-monomer graph,
+    chain-level. The strictest and smallest of the four.
+  expected_entries: 106
+  tags: [deleaked, contact]
+
+val_pinder_pair:
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_pair/index.parquet
+  description: >-
+    V4 deleaking: Pinder-style label-propagation on pair identity. The headline split for
+    leakage-controlled interchain contact numbers.
+  expected_entries: 454
+  tags: [deleaked, contact, headline]

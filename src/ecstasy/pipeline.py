@@ -21,9 +21,12 @@ import numpy as np
 
 from ecstasy.config import settings
 from ecstasy.datasets import Dataset, load_dataset
+from ecstasy.metrics import DEFAULT_CONTACT_METRICS
 from ecstasy.models import ModelRun, load_model, predict_one
 from ecstasy.msa import store
 
+#: Columns the comparison table reports. The scored metric set is per-run and lives in
+#: result.json["metrics"]; this is only what `compare` puts in its fixed columns.
 _METRIC_KEYS = ["AUC", "P@K", "P@K/2", "P@K/5"]
 
 
@@ -48,10 +51,15 @@ class Run:
     def result_path(self) -> Path:
         return self.out_dir / "result.json"
 
+    @property
+    def provenance_path(self) -> Path:
+        return self.out_dir / "provenance.json"
+
     def write_params(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.params_path.write_text(json.dumps({
             "dataset": self.dataset.name,
+            "dataset_version": self.dataset.version,
             "model": self.model.name,
             "preset": self.model.preset,
             "variant": self.model.variant,
@@ -59,6 +67,23 @@ class Run:
             "params": self.model.params,
             "infra": self.model.infra,
         }, indent=1, default=str))
+
+    def write_provenance(self) -> dict:
+        """Record which code and which bytes produced this run.
+
+        Without it two different experiments serialise identically: the MiniFold runner
+        takes ``minifold_src`` as a *path*, and whether the residx patch is applied inside
+        that tree is the whole difference between the intended chain break and the
+        linker-only variant. ``params.json`` records only the path. This records the
+        commit and the dirty flag, so the two stop being indistinguishable.
+        """
+        from ecstasy import provenance
+
+        rec = provenance.capture(params=self.model.params)
+        rec["dataset"] = {**self.dataset.manifest(), "fingerprint": self.dataset.fingerprint()}
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.provenance_path.write_text(json.dumps(rec, indent=1, default=str))
+        return rec
 
 
 def make_run(dataset: str, model: str, preset: str | None = None,
@@ -70,6 +95,9 @@ def make_run(dataset: str, model: str, preset: str | None = None,
 def run_predict(run: Run, limit: int | None = None, profile: bool = False,
                 shard: str | None = None) -> None:
     run.write_params()
+    prov = run.write_provenance()
+    from ecstasy import provenance as _prov
+    print(f"[provenance] {_prov.summarise(prov)}")
     # shard = "i/N": process only entries with index % N == i (for parallel jobs;
     # combined with the contact.npz skip, shards never collide and are resumable).
     si, sn = 0, 1
@@ -104,7 +132,9 @@ def run_predict(run: Run, limit: int | None = None, profile: bool = False,
     print(f"\nDone. processed {n} entries -> {run.predictions_dir}")
 
 
-def run_score(run: Run, limit: int | None = None) -> None:
+def run_score(run: Run, limit: int | None = None,
+              metrics: tuple[str, ...] | None = None) -> None:
+    metrics = tuple(metrics) if metrics else DEFAULT_CONTACT_METRICS
     per_protein: dict[str, dict] = {}
     skipped: list[tuple[str, str]] = []
     errors: list[tuple[str, str]] = []
@@ -118,7 +148,7 @@ def run_score(run: Run, limit: int | None = None) -> None:
             skipped.append((entry.id, "no contact.npz"))
             continue
         try:
-            res = run.dataset.score(entry, contact_path)
+            res = run.dataset.score(entry, contact_path, metrics=metrics)
         except FileNotFoundError as e:
             skipped.append((entry.id, str(e)))
             continue
@@ -134,26 +164,37 @@ def run_score(run: Run, limit: int | None = None) -> None:
 
     aggregate: dict = {
         "dataset": run.dataset.name, "model": run.model.name, "variant": run.model.variant,
+        "metrics": list(metrics),
         "summary": {"n_evaluated": len(per_protein), "n_skipped": len(skipped),
                     "n_errors": len(errors)},
         "per_protein": per_protein,
         "skipped_first_20": skipped[:20], "errors_first_20": errors[:20],
     }
+    # Provenance travels WITH the result, not only beside it. A result.json that outlives
+    # its run directory still names the code and the split that produced it.
+    if run.provenance_path.exists():
+        aggregate["provenance"] = json.loads(run.provenance_path.read_text())
+    else:
+        aggregate["provenance"] = run.write_provenance()
     if per_protein:
+        # Aggregate whatever was actually computed, rather than a fixed key list — that is
+        # what lets a run request P@K(tol=2) and have it summarised without a code change.
+        keys = [k for k in metrics if any(k in v for v in per_protein.values())]
         arrs = {k: np.array([v[k] for v in per_protein.values()
-                             if not np.isnan(v.get(k, np.nan))]) for k in _METRIC_KEYS}
+                             if not np.isnan(v.get(k, np.nan))]) for k in keys}
         aggregate["summary"]["mean"] = {k: float(arrs[k].mean()) if arrs[k].size else float("nan")
-                                        for k in _METRIC_KEYS}
+                                        for k in keys}
         aggregate["summary"]["median"] = {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
-                                          for k in _METRIC_KEYS}
+                                          for k in keys}
 
     run.out_dir.mkdir(parents=True, exist_ok=True)
     run.result_path.write_text(json.dumps(aggregate, indent=1))
     s = aggregate["summary"]
     if "mean" in s:
+        headline = " ".join(f"{k}={s['mean'][k]:.3f}" for k in list(s["mean"])[:4])
         print(f"[{run.dataset.name}/{run.model.name}/{run.model.variant}] "
-              f"n={s['n_evaluated']} mean P@K={s['mean']['P@K']:.3f} "
-              f"AUC={s['mean']['AUC']:.3f} skipped={s['n_skipped']} errors={s['n_errors']}")
+              f"n={s['n_evaluated']} {headline} "
+              f"skipped={s['n_skipped']} errors={s['n_errors']}")
     print(f"result -> {run.result_path}")
 
 

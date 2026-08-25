@@ -10,6 +10,14 @@ A loader implements three methods:
   entries()          -> iterable of Entry (id, sequences, chain_ids)
   gt_for(entry_id)   -> {"contact_map": bool ndarray, "sequences": [...]}
   score(entry, npz)  -> {AUC, P@K, P@K/2, P@K/5, K} (or {"_skipped"/"_error": ...})
+
+Every row also carries **identity**: a ``version``, a human ``description`` and an
+``expected_entries`` count. These are not decoration. A split is a file on a filesystem
+that nothing stops from changing underneath a published number, and the drift is already
+observable — the comments in ``datasets.yaml`` claimed ``val_pinder_chain`` was 98 rows
+and ``val_pinder_pair`` 474, while the parquets hold 106 and 454. ``expected_entries``
+turns that class of drift from a stale comment into a failed check, and
+:meth:`Dataset.fingerprint` records which bytes were actually read.
 """
 from __future__ import annotations
 
@@ -21,6 +29,10 @@ from typing import ClassVar, Iterable
 import yaml
 
 from ecstasy.config import resolve
+
+#: Row keys that describe the dataset rather than tell a loader where to look. Split out
+#: in `load_dataset` so loaders keep narrow, explicit signatures.
+_META_KEYS = ("version", "description", "expected_entries", "tags")
 
 _REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "datasets.yaml"
 
@@ -43,8 +55,13 @@ class Dataset(ABC):
         if getattr(cls, "kind", None):
             Dataset.KINDS[cls.kind] = cls
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, version: int = 1, description: str = "",
+                 expected_entries: int | None = None, tags: list | None = None):
         self.name = name
+        self.version = int(version)
+        self.description = description
+        self.expected_entries = None if expected_entries is None else int(expected_entries)
+        self.tags = list(tags or [])
 
     @abstractmethod
     def entries(self) -> Iterable[Entry]: ...
@@ -53,7 +70,72 @@ class Dataset(ABC):
     def gt_for(self, entry_id: str) -> dict: ...
 
     @abstractmethod
-    def score(self, entry: Entry, contact_path: Path) -> dict[str, float]: ...
+    def score(self, entry: Entry, contact_path: Path,
+              metrics: tuple[str, ...] | None = None) -> dict[str, float]: ...
+
+    # --- identity -------------------------------------------------------------------
+
+    def source_paths(self) -> dict[str, Path]:
+        """The files/directories this dataset is defined by. Loaders should override.
+
+        Used to fingerprint what was actually read, so a result can be checked against
+        the split it claims to describe.
+        """
+        return {}
+
+    def fingerprint(self) -> dict:
+        """Content identity of this dataset's sources, for the provenance record."""
+        from ecstasy.provenance import file_identity
+
+        out: dict[str, dict] = {}
+        for key, path in self.source_paths().items():
+            p = Path(path)
+            out[key] = (file_identity(p) if p.is_file()
+                        else {"path": str(p), "exists": p.exists(), "kind": "directory"})
+        return out
+
+    def manifest(self) -> dict:
+        """Machine-readable description — what `ecstasy datasets` emits.
+
+        This is the surface an agent reads to answer "what evaluation sets exist and what
+        are they" without opening the YAML or guessing from a name.
+        """
+        return {
+            "name": self.name,
+            "kind": getattr(self, "kind", None),
+            "version": self.version,
+            "description": self.description,
+            "expected_entries": self.expected_entries,
+            "tags": self.tags,
+            "sources": {k: str(v) for k, v in self.source_paths().items()},
+        }
+
+    def verify(self) -> dict:
+        """Check the split on disk still matches what the row claims.
+
+        Returns ``{ok, n_entries, expected_entries, problems[]}``. Counting walks the
+        index, so this is a deliberate command rather than something scoring pays for on
+        every run.
+        """
+        problems: list[str] = []
+        for key, path in self.source_paths().items():
+            if not Path(path).exists():
+                problems.append(f"missing source {key}: {path}")
+        n = None
+        if not problems:
+            try:
+                n = sum(1 for _ in self.entries())
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"could not enumerate entries: {type(e).__name__}: {e}")
+        if n is not None and self.expected_entries is not None and n != self.expected_entries:
+            problems.append(
+                f"entry count drift: found {n}, row declares expected_entries="
+                f"{self.expected_entries}. Either the split changed underneath published "
+                f"results, or the row is stale — resolve before trusting new numbers.")
+        if not self.description:
+            problems.append("row has no description")
+        return {"name": self.name, "ok": not problems, "n_entries": n,
+                "expected_entries": self.expected_entries, "problems": problems}
 
 
 def _registry() -> dict:
@@ -62,6 +144,11 @@ def _registry() -> dict:
 
 def dataset_names() -> list[str]:
     return sorted(k for k in _registry() if not k.startswith("_"))
+
+
+def dataset_manifests() -> list[dict]:
+    """Manifests for every registered dataset, without touching the filesystem."""
+    return [load_dataset(n).manifest() for n in dataset_names()]
 
 
 def load_dataset(name: str) -> Dataset:

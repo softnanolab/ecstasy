@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import fire
 
 from ecstasy.datasets import dataset_names
@@ -85,10 +87,60 @@ class Ecstasy:
             if not no_score:
                 pipeline.run_score(r, limit=limit)
 
-    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None):
-        """Score existing predictions over the dataset×model matrix."""
+    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None,
+              metrics=None):
+        """Score existing predictions over the dataset×model matrix.
+
+        --metrics 'P@K,P@K(tol=2)' selects registered metrics by name; see
+        `ecstasy metrics`. Defaults to the canonical set, so adding a metric to the
+        registry never silently changes a headline number.
+        """
         for r in _matrix(dataset, model, preset, set, checkpoint):
-            pipeline.run_score(r, limit=limit)
+            pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None)
+
+    def metrics(self, kind=None, json_out=False):
+        """List registered metrics — the reusable set available to any run or plot."""
+        from ecstasy.metrics import registry
+        rows = registry.describe(kind=kind)
+        if json_out:
+            print(json.dumps(rows, indent=1))
+            return
+        for m in rows:
+            params = f"  {m['params']}" if m["params"] else ""
+            arrow = "higher is better" if m["higher_is_better"] else "lower is better"
+            print(f"  {m['name']:18} [{m['kind']}, {arrow}]{params}\n"
+                  f"      {m['description']}")
+
+    def datasets(self, verify=False, json_out=False):
+        """Describe registered datasets; --verify checks each split against its row.
+
+        `verify` walks each index and reports entry-count drift — a split is a file that
+        nothing stops from changing under a published result, so the declared
+        `expected_entries` is asserted rather than trusted.
+        """
+        from ecstasy.datasets.base import dataset_manifests, dataset_names, load_dataset
+        if verify:
+            reports = [load_dataset(n).verify() for n in dataset_names()]
+            if json_out:
+                print(json.dumps(reports, indent=1))
+            else:
+                for r in reports:
+                    mark = "ok  " if r["ok"] else "FAIL"
+                    print(f"  [{mark}] {r['name']:24} n={r['n_entries']} "
+                          f"expected={r['expected_entries']}")
+                    for p in r["problems"]:
+                        print(f"         - {p}")
+            if any(not r["ok"] for r in reports):
+                raise SystemExit(1)
+            return
+        manifests = dataset_manifests()
+        if json_out:
+            print(json.dumps(manifests, indent=1))
+            return
+        for m in manifests:
+            print(f"  {m['name']:24} v{m['version']}  n={m['expected_entries']}  "
+                  f"tags={','.join(m['tags'])}")
+            print(f"      {' '.join((m['description'] or '(no description)').split())}")
 
     def compare(self, dataset):
         """Aggregate all runs for a dataset into comparison.{csv,md}."""
