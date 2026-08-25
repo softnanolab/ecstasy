@@ -1,0 +1,35 @@
+#!/bin/bash
+#PBS -N mf_predict
+#PBS -q v1_gpu72
+#PBS -l select=1:ncpus=8:mem=96gb:ngpus=1
+#PBS -l walltime=04:00:00
+#PBS -o logs/minifold_predict.out
+#PBS -e logs/minifold_predict.err
+
+cd "$PBS_O_WORKDIR"
+mkdir -p logs
+
+ROOT=/rds/general/user/ha1822/home/MENTOS/LOGS/minifold
+NAT=/rds/general/user/ha1822/home/MENTOS/LOGS/dockq_stage3_cap50_full
+OUT=/rds/general/user/ha1822/home/MENTOS/LOGS/minifold_eval
+
+echo "host=$(hostname) date=$(date)"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+mkdir -p "$OUT"
+
+$ROOT/.venv/bin/python minifold_dimer_predict.py \
+    --natives_dir "$NAT" \
+    --out_dir "$OUT" \
+    --checkpoint "$ROOT/cache/minifold_48L.ckpt" \
+    --minifold_src "$ROOT/src" \
+    --cache "$ROOT/cache" \
+    --linker 25 \
+    --index_jump 512 \
+    --num_recycling 3
+RC=$?
+
+# Scoring needs the natives beside the predictions; symlink rather than copy.
+for f in "$NAT"/*_native.pdb; do ln -sf "$f" "$OUT/$(basename "$f")"; done
+
+echo "exit=$RC date=$(date)"
+exit $RC
