@@ -167,14 +167,21 @@ which makes it a regression test that the refactor did not change the science.
 | Phase | Contents | State |
 |---|---|---|
 | 1 | Metric registry, dataset identity, provenance | **done** — `07c3c19` |
-| 2 | Fingerprints D4/D5/D6 + GT coverage D7 | next — smallest change that stops silent wrongness |
-| 3 | Dataset folder D10, GT derivation D8/D9, assets, MSA recipes D11 | the big one; needs the D8 151-file gate to pass first |
-| 4 | `ecstasy deps` D12, weights folders D14 | |
-| 5 | `ecstasy publish` D13, `ecstasy report` D15, MiniFold re-run D17 | |
+| 2 | Fingerprints D4/D5/D6 + GT coverage D7 | **done** — `d9c57b3` |
+| 2b | Structure metrics in the registry (DockQ/RMSD/TM) | **done** — `9e244b3` |
+| 3a | GT geometry D8 + pickle-free format D9 + importer | **done** — `7b33f33`, gates 151/151 |
+| 3b | mmCIF derivation for entries with no `.pt`; assets; MSA recipes D11 | open |
+| 4 | `ecstasy deps` D12, weights folders D14 | open |
+| 5 | `ecstasy publish` D13, `ecstasy report` D15, MiniFold re-run D17 | open |
 
-Structure metrics (DockQ/iRMSD/LRMSD/TM/RMSD) register in `metrics/builtins.py` in ~10 lines
-once PR #28 lands. They are deliberately not stubbed: a registered name with no implementation
-would report as a *missing number* rather than an *absent capability*.
+PR #28 is **not** being merged, so the structure metrics were built natively in the
+registry shape rather than ported from a pre-registry design. What that leaves outstanding
+is tracked as issues, not assumed.
+
+**Known gap, stated plainly:** structure metrics are registered, verified and reachable by
+name, but `run_score` does not yet invoke them — a model emitting `structure.npz` is
+currently ignored by the scoring pipeline. Likewise the `minifold` model row, its runner,
+and the `mentos_val151` dataset row live only on the unmerged branch and are absent here.
 
 ---
 
