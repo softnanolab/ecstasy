@@ -78,7 +78,12 @@ def run_ecstasy(repo_root: Path, data_root: Path):
         else:
             ecstasy_bin = Path(sys.executable).parent / "ecstasy"
             if not ecstasy_bin.exists():
-                pytest.fail(f"`ecstasy` not on this venv's PATH at {ecstasy_bin}")
+                # Skip, not fail — same condition as the named-venv branch above, and it
+                # deserves the same verdict. Failing here turns "ecstasy is not installed
+                # in this environment" into N red tests that drown genuine failures, in
+                # every env that runs the suite via PYTHONPATH rather than an install.
+                pytest.skip(f"`ecstasy` console script not on this venv's PATH at "
+                            f"{ecstasy_bin}; install ecstasy to run the CLI smokes")
         env = {**os.environ, "DATA_ROOT": str(data_root)}
         return subprocess.run([str(ecstasy_bin), *args], capture_output=True, text=True,
                               timeout=timeout, cwd=str(repo_root), env=env)
