@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from ecstasy.metrics.contact import pak_inter_chain_metric, pak_inter_tolerant
 from ecstasy.metrics.registry import register
+from ecstasy.metrics.structure import _chain_stat, dockq_component
 
 
 def _register_contact() -> None:
@@ -43,12 +44,45 @@ def _register_contact() -> None:
             )
 
 
+def _register_structure() -> None:
+    # DockQ and its components. All four come from ONE subprocess (the result is cached
+    # on the eval input), so four registered names do not mean four invocations.
+    #
+    # iRMSD and LRMSD are registered as first-class metrics rather than left as
+    # diagnostics because DockQ averages fnat with two RMSD terms: a prediction whose
+    # backbone has not formed still scores off fnat alone while both RMSD terms give
+    # near-zero credit. A DockQ number read without them is misleading.
+    for key, desc, higher in (
+        ("DockQ", "Overall docking quality, 0-1 (Basu & Wallner). NEVER read without "
+                  "iRMSD/LRMSD beside it — an unformed backbone still scores off fnat.", True),
+        ("Fnat", "Fraction of native interface contacts recovered.", True),
+        ("iRMSD", "Interface backbone RMSD in Å. Lower is better.", False),
+        ("LRMSD", "Ligand (mobile chain) RMSD in Å after receptor superposition. "
+                  "Lower is better.", False),
+    ):
+        register(key, "structure", dockq_component, desc, higher_is_better=higher, key=key)
+
+    # Per-chain fold quality, each chain superposed on its own. This is what separates
+    # "folded but docked wrong" from "never folded" — two results a DockQ near zero
+    # cannot tell apart, and the distinction a single-chain folder under a linker hack
+    # exists to probe.
+    for name, key, how, desc, higher in (
+        ("TM_mean", "TM", "mean",
+         "Mean per-chain TM-score, each chain superposed independently. Plain Kabsch, "
+         "not TM-align's iterative search, so a slight under-estimate.", True),
+        ("TM_min", "TM", "min",
+         "Worst per-chain TM-score — catches one chain failing while the other folds.", True),
+        ("CA_RMSD_mean", "CA_RMSD", "mean",
+         "Mean per-chain CA-RMSD in Å after independent superposition. Lower is better.",
+         False),
+    ):
+        register(name, "structure", _chain_stat, desc, higher_is_better=higher,
+                 key=key, how=how)
+
+
 def register_all() -> None:
     _register_contact()
-    # Structure metrics (DockQ, iRMSD, LRMSD, TM, CA-RMSD) register here once the
-    # structure scoring path lands on main — see PR #28. They are deliberately not
-    # stubbed: an unimplemented registered name would report as a missing number rather
-    # than an absent capability.
+    _register_structure()
 
 
 register_all()
