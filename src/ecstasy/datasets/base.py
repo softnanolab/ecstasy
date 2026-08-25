@@ -105,18 +105,6 @@ class Dataset(ABC):
         # whether a target had enough signal to be scored at all.
         _, gti, vi = ev.inter_block()
         out["K"] = float(int((gti & vi).sum()))
-        # TWO different notions, deliberately reported separately because they disagree
-        # sharply — on the 151-dimer val split, 39 vs 129 entries:
-        #
-        #   is_sequence_identical  the two chains are the SAME STRING. This is the one
-        #                          that matters for a poly-G linker hack, which feeds the
-        #                          language model one sequence duplicated around a
-        #                          glycine run — something it has never seen in training.
-        #   is_homodimer           the dataset's own flag, a looser homology notion.
-        #
-        # Reporting only the latter under the name "homodimer" would answer a different
-        # question than the one the split was introduced to answer.
-        out["is_sequence_identical"] = float(seqs[0] == seqs[1])
         if gt.get("is_homodimer") is not None:
             out["is_homodimer"] = float(bool(gt["is_homodimer"]))
         return out
@@ -141,6 +129,67 @@ class Dataset(ABC):
             out[key] = (file_identity(p) if p.is_file()
                         else {"path": str(p), "exists": p.exists(), "kind": "directory"})
         return out
+
+    def composition(self) -> dict:
+        """What this split is made of — computed ONCE and stored, never per campaign.
+
+        This exists because of a concrete failure. A campaign doc asserted "40 true
+        homodimers, 111 heterodimers" for the 151-dimer val split, derived ad hoc by
+        testing exact chain-sequence equality. The dataset's own flag says 129/22. Both
+        numbers were reported as fact, and downstream a homo/hetero result table was
+        computed on the wrong one.
+
+        Reconciled: of the 90 that the flag calls homodimeric while their sequences
+        differ, **86 are >= 90% identical** — the same protein, differing only in how many
+        residues were experimentally resolved (10bl: 344 vs 345). Exact string equality
+        was therefore measuring crystallography, not biology.
+
+        The lesson is not "pick the right boolean". It is that a boolean bakes one
+        definition into the data and hides the rest, so the next person picks a different
+        one. The **distribution** is recorded instead, and any threshold can be applied
+        afterwards without re-deriving anything:
+
+            n_entries, n_dimers, chain_lengths (min/median/max),
+            n_homodimer_flag, chain_identity histogram + per-entry values
+
+        Note the flag is not perfectly clean either: 4 of the 151 fall below 90% identity,
+        one at 0.128 (699 vs 96 residues — a chain almost entirely unresolved).
+        """
+        from difflib import SequenceMatcher
+
+        ids, lengths, identity, flags = [], [], {}, {}
+        for entry in self.entries():
+            if not self.has_gt(entry.id):
+                continue
+            gt = self.gt_for(entry.id)
+            seqs = gt["sequences"]
+            ids.append(entry.id)
+            lengths.append(sum(len(s) for s in seqs))
+            if len(seqs) == 2:
+                identity[entry.id] = round(
+                    1.0 if seqs[0] == seqs[1]
+                    else SequenceMatcher(None, seqs[0], seqs[1], autojunk=False).ratio(), 4)
+            if gt.get("is_homodimer") is not None:
+                flags[entry.id] = bool(gt["is_homodimer"])
+
+        vals = sorted(identity.values())
+        bands = {"identical": 0, ">=0.99": 0, ">=0.95": 0, ">=0.90": 0, "<0.90": 0}
+        for r in vals:
+            key = ("identical" if r == 1.0 else ">=0.99" if r >= 0.99
+                   else ">=0.95" if r >= 0.95 else ">=0.90" if r >= 0.90 else "<0.90")
+            bands[key] += 1
+        return {
+            "n_entries": len(ids),
+            "n_dimers": len(identity),
+            "chain_identity_bands": bands,
+            "chain_identity": identity,
+            "n_homodimer_flag": sum(flags.values()) if flags else None,
+            "total_length": {
+                "min": min(lengths) if lengths else None,
+                "median": (sorted(lengths)[len(lengths) // 2] if lengths else None),
+                "max": max(lengths) if lengths else None,
+            },
+        }
 
     def manifest(self) -> dict:
         """Machine-readable description — what `ecstasy datasets` emits.

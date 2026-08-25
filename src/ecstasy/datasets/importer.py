@@ -127,6 +127,15 @@ def import_from_mentos(source, dest: Path, name: str | None = None,
         shutil.copy2(source.index, index_dest)
 
     _write_manifest(dest, name, source, report)
+
+    # Composition is computed here, once, against the folder that was just written — so
+    # every later reader gets the same numbers instead of re-deriving them with whatever
+    # definition they happen to pick. Written separately from dataset.yaml because the
+    # per-entry identity table is long and dataset.yaml should stay scannable.
+    from ecstasy.datasets.ecstasy_native import EcstasyDataset
+
+    imported = EcstasyDataset(name=name, root=dest, split=getattr(source, "split", None))
+    (dest / "composition.json").write_text(json.dumps(imported.composition(), indent=1))
     return report
 
 
