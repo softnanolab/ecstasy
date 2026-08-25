@@ -72,6 +72,17 @@ reproducing the 151 existing MENTOS `.pt` files exactly** before being trusted f
 Conventions to match are documented and simple: 64 bins, `linspace(2.3125, 21.6875, 63)`,
 threshold bin 19 (≤ 7.9375 Å), `-1` undefined.
 
+*Chain selection.* The split index records `id`, `sequences`, `num_chains` and
+`bsa_per_side` — but **not chain IDs**; its `relative_path` points straight at the `.pt`, so
+today the index depends on the GT file for anything beyond sequences. Derivation therefore
+sequence-matches the index's two sequences against the chains of the mmCIF assembly, using
+`bsa_per_side` to disambiguate when several pairs match.
+
+*Gate failure is not negotiable.* A 99% match is the dangerous outcome — it looks fine and
+quietly shifts a handful of numbers. If 151/151 is not achieved, the derived GT is a
+**different** ground truth: ship it as a separately versioned `ecstasy-gt-v1`, label every
+result with which GT produced it, and never average across the two.
+
 ### D9 — GT is stored as pickle-free per-entry `.npz`
 Consequence worth stating plainly: `gt_for` currently unpickles a `mentos.dataclasses.Sample`,
 and **that is the only reason a scoring env needs MENTOS at all.** Owning the format removes
@@ -125,6 +136,30 @@ A MENTOS bump therefore writes a **new line**, so `git log` on that file shows a
 and why. Per-protein detail stays in `$DATA_ROOT`; the repo keeps summaries, not blobs. Notion
 becomes a generated view rather than the source of truth.
 
+### D14 — Weights are first-class folders, addressed by name
+`$DATA_ROOT/weights/<model>/<name>/` with a manifest recording source URL, sha256, size and
+what produced it — the same shape as a dataset folder, so one mental model covers both.
+`--checkpoint <name>` then works for **any** model, not just mentos, and the name plus content
+hash lands in provenance. Removes Notion from the resolution path and fixes MiniFold's weights
+currently being a bare symlink into a MENTOS log directory.
+
+### D15 — Results are displayed from the committed data
+`ecstasy report` renders the JSONL into a leaderboard: markdown in-repo for agents and diffs,
+plus a shareable page. `--to notion` pushes the same data. Nothing needs a token or a network
+to **read** results — an agent picking up a task must be able to see what has already been
+benchmarked from the repo alone. Notion keeps what it is genuinely better at: narrative
+campaign entries with figures.
+
+### D16 — The layout change is a clean break
+There is no historical corpus to migrate: `$DATA_ROOT` holds 72 MB, all of it one in-flight
+run. The old `runs/` tree is left untouched and ignored rather than converted.
+
+### D17 — The first published record is a re-run, not an import
+The current MiniFold sweep predates provenance capture and has only a hand-written record. It
+will be re-run once fingerprinting lands, so the store has no half-trusted first row and no
+special case. The existing numbers are not wasted: **the re-run must reproduce them exactly**,
+which makes it a regression test that the refactor did not change the science.
+
 ---
 
 ## 3. Sequencing
@@ -134,8 +169,8 @@ becomes a generated view rather than the source of truth.
 | 1 | Metric registry, dataset identity, provenance | **done** — `07c3c19` |
 | 2 | Fingerprints D4/D5/D6 + GT coverage D7 | next — smallest change that stops silent wrongness |
 | 3 | Dataset folder D10, GT derivation D8/D9, assets, MSA recipes D11 | the big one; needs the D8 151-file gate to pass first |
-| 4 | `ecstasy deps` D12, weights registry symmetry | |
-| 5 | `ecstasy publish` D13 + Notion view | |
+| 4 | `ecstasy deps` D12, weights folders D14 | |
+| 5 | `ecstasy publish` D13, `ecstasy report` D15, MiniFold re-run D17 | |
 
 Structure metrics (DockQ/iRMSD/LRMSD/TM/RMSD) register in `metrics/builtins.py` in ~10 lines
 once PR #28 lands. They are deliberately not stubbed: a registered name with no implementation
@@ -153,3 +188,5 @@ would report as a *missing number* rather than an *absent capability*.
 * **D9** — score a run in a venv with **no mentos installed**; it must succeed
 * **D11** — generate two recipes for one dataset; assert both persist and that switching invalidates predictions
 * **D13** — publish twice with identical fingerprints (duplicate refused); bump a dep and publish (new line appended)
+* **D14** — `--checkpoint <name>` resolves for a non-mentos model, and the recorded sha256 matches the file on disk
+* **D17** — the re-run's per-target numbers must equal the current sweep's exactly; any drift is a refactor regression, not a new result
