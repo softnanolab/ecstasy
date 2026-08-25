@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import fire
 
@@ -104,6 +105,34 @@ class Ecstasy:
         for r in _matrix(dataset, model, preset, set, checkpoint):
             pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None,
                                allow_partial=allow_partial)
+
+    def import_dataset(self, dataset, dest=None, name=None, overwrite=False, limit=None):
+        """Materialise a registered dataset into a self-contained folder.
+
+        Copies the index and converts ground truth into ecstasy's pickle-free per-entry
+        format, so the resulting folder can be scored with numpy and pandas alone — no
+        MENTOS, no torch, no unpickling a class that has to stay importable.
+
+        Reports exactly which entries had no ground truth, so a partial split is a
+        visible fact rather than a silently reduced mean later.
+
+        Default destination is $DATA_ROOT/datasets/<name>.
+        """
+        from ecstasy.config import settings
+        from ecstasy.datasets.base import load_dataset
+        from ecstasy.datasets.importer import import_from_mentos
+
+        src = load_dataset(dataset)
+        name = name or dataset
+        dest = Path(dest) if dest else settings().DATA_ROOT / "datasets" / name
+        report = import_from_mentos(src, dest, name=name, overwrite=overwrite,
+                                    limit=limit)
+        print(report.summary())
+        if not report.complete:
+            print("\nIncomplete. The folder is usable for the entries it has, but a run "
+                  "over it will be partial and `ecstasy score` will refuse a headline "
+                  "mean without allow_partial=True.")
+        return None
 
     def metrics(self, kind=None, json_out=False):
         """List registered metrics — the reusable set available to any run or plot."""

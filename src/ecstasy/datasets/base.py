@@ -188,7 +188,7 @@ def load_dataset(name: str) -> Dataset:
     row = resolve(dict(reg[name]))  # expand ${VAR}; copy so we can pop
     kind = row.pop("kind")
     # import loaders so they self-register via __init_subclass__
-    from ecstasy.datasets import mentos  # noqa: F401
+    from ecstasy.datasets import ecstasy_native, mentos  # noqa: F401
 
     if kind not in Dataset.KINDS:
         raise KeyError(f"dataset {name!r} has unknown kind {kind!r}; have {sorted(Dataset.KINDS)}")
