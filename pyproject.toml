@@ -53,4 +53,5 @@ markers = [
     "model_colabfold: ColabFold (AF2) predict smoke",
     "model_plmgraph_inter: PLMGraph-Inter predict smoke",
     "model_deepinteract: DeepInteract predict smoke",
+    "model_minifold: MiniFold predict smoke (contact.npz + structure.npz)",
 ]

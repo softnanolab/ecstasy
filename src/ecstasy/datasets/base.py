@@ -10,6 +10,14 @@ A loader implements three methods:
   entries()          -> iterable of Entry (id, sequences, chain_ids)
   gt_for(entry_id)   -> {"contact_map": bool ndarray, "sequences": [...]}
   score(entry, npz)  -> {AUC, P@K, P@K/2, P@K/5, K} (or {"_skipped"/"_error": ...})
+
+and may additionally implement:
+  score_structure(entry, structure_npz, ...) -> {DockQ, iRMSD, LRMSD, TM_mean, ...}
+
+which is optional because it needs full-atom ground truth, which not every dataset
+carries. A dataset without it is simply never asked for structure metrics; a model
+that emits no ``structure.npz`` is never structure-scored. The contact path is
+unaffected either way.
 """
 from __future__ import annotations
 
@@ -54,6 +62,20 @@ class Dataset(ABC):
 
     @abstractmethod
     def score(self, entry: Entry, contact_path: Path) -> dict[str, float]: ...
+
+    #: True when the loader implements :meth:`score_structure` against full-atom GT.
+    has_structure_gt: ClassVar[bool] = False
+
+    def score_structure(self, entry: Entry, structure_path: Path,
+                        work_dir: Path | None = None, **kw) -> dict[str, float]:
+        """Score a predicted structure (a runner's ``structure.npz``) against the GT.
+
+        Optional: only datasets carrying full-atom ground truth can implement it, and
+        they must set :attr:`has_structure_gt`.
+        """
+        raise NotImplementedError(
+            f"dataset {self.name!r} ({type(self).__name__}) has no full-atom ground "
+            f"truth, so it cannot score structures")
 
 
 def _registry() -> dict:

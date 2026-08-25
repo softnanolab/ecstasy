@@ -5,10 +5,17 @@ Output layout — stable and human-readable (no opaque whole-config hash):
   $DATA_ROOT/ecstasy/runs/<dataset>/<model>/<variant>/
       params.json                       # provenance: preset, params, infra, msa
       predictions/<entry_id>/contact.npz
+      predictions/<entry_id>/structure.npz   # optional, structure-emitting models only
       result.json                       # scoring summary + per-protein metrics
 
 `variant` is the preset name (e.g. ``full``), or ``<preset>+<sha8>`` when --set
 overrides were given. Trivial infra changes never fork the dir.
+
+``contact.npz`` is the required output of every runner; ``structure.npz`` is optional
+and additive. When a model emits one AND the dataset carries full-atom ground truth,
+scoring also produces DockQ / iRMSD / LRMSD and per-chain monomer metrics. Nothing about
+the contact path changes when it is absent, so contact-only models and structure-less
+datasets are unaffected.
 """
 from __future__ import annotations
 
@@ -25,6 +32,9 @@ from ecstasy.models import ModelRun, load_model, predict_one
 from ecstasy.msa import store
 
 _METRIC_KEYS = ["AUC", "P@K", "P@K/2", "P@K/5"]
+#: Structure metrics, aggregated only for runs that produced them.
+_STRUCTURE_KEYS = ["DockQ", "Fnat", "iRMSD", "LRMSD", "TM_mean", "TM_min",
+                   "CA_RMSD_mean", "null_DockQ_mean", "null_DockQ_max"]
 
 
 @dataclass(frozen=True)
@@ -104,16 +114,18 @@ def run_predict(run: Run, limit: int | None = None, profile: bool = False,
     print(f"\nDone. processed {n} entries -> {run.predictions_dir}")
 
 
-def run_score(run: Run, limit: int | None = None) -> None:
+def run_score(run: Run, limit: int | None = None, null_draws: int = 0) -> None:
     per_protein: dict[str, dict] = {}
     skipped: list[tuple[str, str]] = []
     errors: list[tuple[str, str]] = []
+    struct_skipped: list[tuple[str, str]] = []
     n = 0
     for entry in run.dataset.entries():
         if limit is not None and n >= int(limit):
             break
         n += 1
-        contact_path = run.predictions_dir / entry.id / "contact.npz"
+        entry_dir = run.predictions_dir / entry.id
+        contact_path = entry_dir / "contact.npz"
         if not contact_path.exists():
             skipped.append((entry.id, "no contact.npz"))
             continue
@@ -127,10 +139,27 @@ def run_score(run: Run, limit: int | None = None) -> None:
             continue
         if "_skipped" in res:
             skipped.append((entry.id, res["_skipped"]))
-        elif "_error" in res:
+            continue
+        if "_error" in res:
             errors.append((entry.id, res["_error"]))
-        else:
-            per_protein[entry.id] = {k: float(v) for k, v in res.items()}
+            continue
+        res = dict(res)
+        # Structure scoring is additive: it runs only when the model emitted a
+        # structure AND the dataset has full-atom GT, and a failure there never
+        # discards the contact metrics that already succeeded.
+        structure_path = entry_dir / "structure.npz"
+        if structure_path.exists() and run.dataset.has_structure_gt:
+            try:
+                s = run.dataset.score_structure(
+                    entry, structure_path, work_dir=entry_dir, null_draws=null_draws)
+            except Exception as e:  # noqa: BLE001
+                struct_skipped.append((entry.id, f"{type(e).__name__}: {e}"))
+            else:
+                if "_skipped" in s or "_error" in s:
+                    struct_skipped.append((entry.id, s.get("_skipped") or s["_error"]))
+                else:
+                    res.update(s)
+        per_protein[entry.id] = {k: float(v) for k, v in res.items()}
 
     aggregate: dict = {
         "dataset": run.dataset.name, "model": run.model.name, "variant": run.model.variant,
@@ -139,13 +168,14 @@ def run_score(run: Run, limit: int | None = None) -> None:
         "per_protein": per_protein,
         "skipped_first_20": skipped[:20], "errors_first_20": errors[:20],
     }
+    if struct_skipped:
+        aggregate["summary"]["n_structure_skipped"] = len(struct_skipped)
+        aggregate["structure_skipped_first_20"] = struct_skipped[:20]
     if per_protein:
-        arrs = {k: np.array([v[k] for v in per_protein.values()
-                             if not np.isnan(v.get(k, np.nan))]) for k in _METRIC_KEYS}
-        aggregate["summary"]["mean"] = {k: float(arrs[k].mean()) if arrs[k].size else float("nan")
-                                        for k in _METRIC_KEYS}
-        aggregate["summary"]["median"] = {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
-                                          for k in _METRIC_KEYS}
+        aggregate["summary"].update(_aggregate(per_protein.values(), _METRIC_KEYS))
+        struct = [v for v in per_protein.values() if "DockQ" in v]
+        if struct:
+            aggregate["summary"]["structure"] = _structure_summary(struct)
 
     run.out_dir.mkdir(parents=True, exist_ok=True)
     run.result_path.write_text(json.dumps(aggregate, indent=1))
@@ -154,7 +184,57 @@ def run_score(run: Run, limit: int | None = None) -> None:
         print(f"[{run.dataset.name}/{run.model.name}/{run.model.variant}] "
               f"n={s['n_evaluated']} mean P@K={s['mean']['P@K']:.3f} "
               f"AUC={s['mean']['AUC']:.3f} skipped={s['n_skipped']} errors={s['n_errors']}")
+    if "structure" in s:
+        st = s["structure"]
+        print(f"  structure n={st['n']} mean DockQ={st['mean']['DockQ']:.3f} "
+              f"median={st['median']['DockQ']:.3f} "
+              f"iRMSD={st['mean']['iRMSD']:.2f}A LRMSD={st['mean']['LRMSD']:.2f}A "
+              f"acceptable={st['acceptable_fraction']:.3f}")
     print(f"result -> {run.result_path}")
+
+
+def _nan_safe(value: float, fmt: str = ".4f") -> str:
+    """Format a float, rendering NaN as an em dash rather than the literal 'nan'."""
+    return f"{value:{fmt}}" if value == value else "—"
+
+
+def _aggregate(rows, keys: list[str]) -> dict:
+    """Mean + median per key, over the rows where that key is present and finite."""
+    arrs = {k: np.array([v[k] for v in rows
+                         if not np.isnan(v.get(k, np.nan))]) for k in keys}
+    return {
+        "mean": {k: float(arrs[k].mean()) if arrs[k].size else float("nan") for k in keys},
+        "median": {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
+                   for k in keys},
+    }
+
+
+def _structure_summary(rows: list[dict]) -> dict:
+    """DockQ summary: central tendency, quality bands, and the homo/hetero split.
+
+    The split is not decoration. Under the poly-G-linker multimer hack a homodimer is
+    one sequence duplicated around a glycine run, which no language model has seen in
+    training; a collapsed or domain-swapped prediction there says something about the
+    hack, not about the model's ability to dock. Reporting the pooled mean alone hides
+    that.
+    """
+    from ecstasy.metrics.structure import dockq_bands
+
+    out: dict = {"n": len(rows)}
+    out.update(_aggregate(rows, _STRUCTURE_KEYS))
+    out.update(dockq_bands([v["DockQ"] for v in rows if not np.isnan(v.get("DockQ", np.nan))]))
+    # Only rows that actually carry the flag are split. Defaulting a missing flag to
+    # "heterodimer" would report a split that was never measured.
+    labelled = [v for v in rows if "is_homodimer" in v]
+    homo = [v for v in labelled if v["is_homodimer"] >= 0.5]
+    hetero = [v for v in labelled if v["is_homodimer"] < 0.5]
+    for label, subset in (("homodimer", homo), ("heterodimer", hetero)):
+        if not subset:
+            continue
+        scores = [v["DockQ"] for v in subset if not np.isnan(v.get("DockQ", np.nan))]
+        out[label] = {"n": len(subset), **_aggregate(subset, _STRUCTURE_KEYS),
+                      **dockq_bands(scores)}
+    return out
 
 
 def flops_summary(run_dir: Path) -> dict | None:
@@ -202,6 +282,8 @@ def run_compare(dataset: str) -> None:
             continue
         mean, median = summary["mean"], summary.get("median", {})
         fl = flops_summary(p.parent) or {}
+        st = summary.get("structure", {})
+        st_mean, st_median = st.get("mean", {}), st.get("median", {})
         rows.append({
             "model": data.get("model", p.parts[-3]),
             "variant": data.get("variant", p.parts[-2]),
@@ -216,6 +298,13 @@ def run_compare(dataset: str) -> None:
             "mean_flops": fl.get("mean_flops", float("nan")),
             "median_flops": fl.get("median_flops", float("nan")),
             "n_flops": fl.get("n_flops", 0),
+            "n_structure": st.get("n", 0),
+            "mean_DockQ": st_mean.get("DockQ", float("nan")),
+            "median_DockQ": st_median.get("DockQ", float("nan")),
+            "mean_iRMSD": st_mean.get("iRMSD", float("nan")),
+            "mean_LRMSD": st_mean.get("LRMSD", float("nan")),
+            "mean_TM": st_mean.get("TM_mean", float("nan")),
+            "acceptable_fraction": st.get("acceptable_fraction", float("nan")),
         })
     if not rows:
         print(f"no result.json with summary metrics under {root}", file=sys.stderr)
@@ -224,7 +313,9 @@ def run_compare(dataset: str) -> None:
 
     cols = ["model", "variant", "n", "skipped", "errors",
             "mean_P@K", "median_P@K", "mean_P@K/2", "mean_P@K/5", "mean_AUC",
-            "mean_flops", "median_flops", "n_flops"]
+            "mean_flops", "median_flops", "n_flops",
+            "n_structure", "mean_DockQ", "median_DockQ", "mean_iRMSD", "mean_LRMSD",
+            "mean_TM", "acceptable_fraction"]
     csv_path = root / "comparison.csv"
     with csv_path.open("w") as f:
         f.write(",".join(cols) + "\n")
@@ -244,5 +335,23 @@ def run_compare(dataset: str) -> None:
             f.write(f"| {r['model']} | {r['variant']} | {r['n']} | {r['mean_P@K']:.4f} | "
                     f"{r['median_P@K']:.4f} | {r['mean_P@K/2']:.4f} | {r['mean_P@K/5']:.4f} | "
                     f"{r['mean_AUC']:.4f} | {gf} | {r['n_flops']} |\n")
+
+        struct_rows = [r for r in rows if r["n_structure"]]
+        if struct_rows:
+            struct_rows.sort(key=lambda r: r["mean_DockQ"], reverse=True)
+            f.write("\n## Structure (DockQ)\n\n")
+            # iRMSD/LRMSD are printed beside DockQ deliberately: DockQ averages fnat
+            # with two RMSD terms, so an unformed backbone still scores off fnat alone.
+            # A DockQ column read on its own is misleading.
+            f.write("| model | variant | n | mean DockQ | median DockQ | iRMSD (Å) | "
+                    "LRMSD (Å) | mean TM | acceptable |\n")
+            f.write("|---|---|---|---|---|---|---|---|---|\n")
+            for r in struct_rows:
+                f.write(f"| {r['model']} | {r['variant']} | {r['n_structure']} | "
+                        f"{_nan_safe(r['mean_DockQ'])} | {_nan_safe(r['median_DockQ'])} | "
+                        f"{_nan_safe(r['mean_iRMSD'], '.2f')} | "
+                        f"{_nan_safe(r['mean_LRMSD'], '.2f')} | "
+                        f"{_nan_safe(r['mean_TM'])} | "
+                        f"{_nan_safe(r['acceptable_fraction'], '.3f')} |\n")
     print(f"wrote {csv_path}\nwrote {md_path}\n")
     print(md_path.read_text())

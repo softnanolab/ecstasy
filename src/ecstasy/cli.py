@@ -68,7 +68,7 @@ class Ecstasy:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
-            profile=False, checkpoint=None, shard=None):
+            profile=False, checkpoint=None, shard=None, null_draws=0):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
         --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
@@ -78,17 +78,29 @@ class Ecstasy:
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
         --shard 'i/N' processes only every N-th entry (offset i) for parallel jobs;
         combined with the contact.npz skip the shards never collide and are resumable.
+        --null_draws N adds the random-placement DockQ floor (see `score`).
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
             pipeline.run_predict(r, limit=limit, profile=profile, shard=shard)
             if not no_score:
-                pipeline.run_score(r, limit=limit)
+                pipeline.run_score(r, limit=limit, null_draws=null_draws)
 
-    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None):
-        """Score existing predictions over the dataset×model matrix."""
+    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None,
+              null_draws=0):
+        """Score existing predictions over the dataset×model matrix.
+
+        Models that emitted a structure.npz are additionally scored with DockQ, iRMSD,
+        LRMSD and per-chain monomer metrics when the dataset carries full-atom GT.
+
+        --null_draws N computes the random-placement floor per target: the model's own
+        chains with chain B randomly re-docked, N draws, DockQ'd. Fold quality is held
+        fixed and only the placement is destroyed, so the result is what DockQ gives away
+        for free on this target and it is the reference a low DockQ must be read against.
+        Costs N extra DockQ invocations per target; off by default.
+        """
         for r in _matrix(dataset, model, preset, set, checkpoint):
-            pipeline.run_score(r, limit=limit)
+            pipeline.run_score(r, limit=limit, null_draws=null_draws)
 
     def compare(self, dataset):
         """Aggregate all runs for a dataset into comparison.{csv,md}."""

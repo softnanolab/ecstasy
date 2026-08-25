@@ -43,3 +43,12 @@ val_pinder_chain:   # V3 depth-2 walk, fused interface-monomer graph (98)
 val_pinder_pair:    # V4 LPA pair identity — headline               (474)
   <<: *mentos
   index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_pair/index.parquet
+
+# MENTOS PDB val dimers — the 151-entry set the DockQ checkpoint series was evaluated on.
+# Verified by set equality against $LOGS_DIR/dockq_stage3_cap50_full/*_native.pdb: 151/151.
+# Overlap with the deleaked splits is only partial (val_seq_pair 76, val_seq_chain 75,
+# val_pinder_pair 37, val_pinder_chain 17), so none of them substitutes for it. This is
+# the split to use for anything compared against the MENTOS DockQ numbers.
+mentos_val151:
+  <<: *mentos
+  index: ${MENTOS_ROOT}/pdb/processed/splits/val/index.parquet
