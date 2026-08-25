@@ -195,7 +195,10 @@ def main():
     # carry a trailing recycling axis (they are (L, n_recycle)), so indexing that here
     # would yield (L_keep, n_recycle) and corrupt every residue name in the PDB.
     # `restype_order_with_x` is AF2's 20+X ordering, which is what the writer expects.
-    aatype = np.array([restype_order_with_x[r] for r in "".join(sequences)])
+    # Unknown letters fall back to X, matching what `of_inference` fed the model — a
+    # KeyError here would abort a sweep on one odd residue.
+    unk = restype_order_with_x["X"]
+    aatype = np.array([restype_order_with_x.get(r, unk) for r in "".join(sequences)])
     asym_id = np.concatenate([np.full(len(s), i) for i, s in enumerate(sequences)])
     residue_index = np.concatenate([np.arange(len(s)) for s in sequences])
     np.savez_compressed(
