@@ -62,25 +62,30 @@ fi
 ls -lh "${CKPT}"
 
 echo "==> Verifying: patched source wins, residx reaches the trunk, ESM2 backbone cached"
+# Deliberately does NOT construct the model. `load_model_and_alphabet` would build the
+# 3B-parameter backbone in RAM (>10 GB) — fine on a compute node, antisocial on a login
+# node, and liable to be killed there. The files are streamed to the hub cache instead;
+# the first real run instantiates the model where it belongs.
 MINIFOLD_SRC="${SRC}" TORCH_HUB_DIR="${CACHE}" "${VENV}/bin/python" - <<'PY'
 import inspect
 import os
 import sys
+from pathlib import Path
 
 src = os.environ["MINIFOLD_SRC"]
 sys.path.insert(0, src)
 
 import torch
 
-torch.hub.set_dir(os.environ["TORCH_HUB_DIR"])
+hub_dir = os.environ["TORCH_HUB_DIR"]
+torch.hub.set_dir(hub_dir)
 
 import minifold
-from pathlib import Path
 
 tree = Path(minifold.__file__).resolve().parent.parent
 assert tree == Path(src).resolve(), f"minifold resolved to {minifold.__file__}, not {src}"
 
-# Subpackages the broken wheel omits — these only import from the source tree.
+# Subpackages the broken wheel omits — these resolve only from the source tree.
 import minifold.data.config  # noqa: F401
 import minifold.model.model as mm
 import minifold.utils.protein  # noqa: F401
@@ -88,9 +93,20 @@ import minifold.utils.protein  # noqa: F401
 assert "residx" in inspect.signature(mm.FoldingTrunk.forward).parameters, \
     "FoldingTrunk.forward takes no residx — the patch is not applied"
 
-# Pull the ESM2-3B backbone into the cache now, on the network-capable node.
-from esm.pretrained import load_model_and_alphabet
-load_model_and_alphabet("esm2_t36_3B_UR50D")
+# Stream the ESM2-3B backbone into the hub cache. These are the exact two files and
+# destination fair-esm's `load_model_and_alphabet_hub` expects, so the first real run
+# finds them cached and makes no network call.
+ESM = "esm2_t36_3B_UR50D"
+ckpt_dir = Path(hub_dir) / "checkpoints"
+ckpt_dir.mkdir(parents=True, exist_ok=True)
+for url in (f"https://dl.fbaipublicfiles.com/fair-esm/models/{ESM}.pt",
+            f"https://dl.fbaipublicfiles.com/fair-esm/regression/{ESM}-contact-regression.pt"):
+    dest = ckpt_dir / url.rsplit("/", 1)[1]
+    if dest.exists():
+        print(f"  cached {dest.name} ({dest.stat().st_size / 1e9:.1f} GB)")
+        continue
+    print(f"  fetching {dest.name} ...")
+    torch.hub.download_url_to_file(url, str(dest))
 
 print("OK torch", torch.__version__, "| tree", tree, "| residx accepted")
 PY
