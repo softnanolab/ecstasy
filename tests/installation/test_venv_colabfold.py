@@ -48,6 +48,15 @@ def test_colabfold_venv_alphafold_import(run_in_venv):
 
 @pytest.mark.installation
 def test_colabfold_venv_colabfold_batch_bin(venvs):
-    """`colabfold_batch` console script must exist (used by the runner)."""
-    bin_path = venvs["colabfold"] / "bin" / "colabfold_batch"
+    """`colabfold_batch` console script must exist (used by the runner).
+
+    Skips when the venv itself is absent, matching every other test in this file —
+    they go through `run_in_venv`, which skips via `_venv_python`. Asserting here made
+    "colabfold is not installed on this machine" report as a test failure, which is a
+    different claim: the console script is missing only if the venv exists without it.
+    """
+    venv = venvs["colabfold"]
+    if not (venv / "bin" / "python").exists():
+        pytest.skip(f"venv 'colabfold' missing at {venv}")
+    bin_path = venv / "bin" / "colabfold_batch"
     assert bin_path.exists(), f"colabfold_batch missing at {bin_path}"

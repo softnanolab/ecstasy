@@ -1,91 +1,149 @@
-# Evaluation datasets (interchain contact prediction). Rows, not classes.
+# Evaluation datasets. Rows, not classes.
 # ${VAR} expands against ecstasy.config.Settings (DATA_ROOT/MENTOS_ROOT/...).
-#   kind              loader class (mentos_square)
-#   index             split index parquet (has a `split` column + `sequences`)
-#   gt_root           per-entry ground-truth root (<gt_root>/<id[:2]>/<id>.pt)
-#   split             which split column value to evaluate (mentos_square)
-#   contact_bin       Cβ-Cβ distance-bin threshold; bins < contact_bin are contacts
 #
-# Identity — required on every row, and checked by `ecstasy datasets verify`:
-#   version           bump when the underlying split changes in a way that moves numbers
+# EVERY SCORABLE ROW IS `kind: ecstasy` AND LIVES UNDER ${DATA_ROOT}. Nothing on the
+# scoring path resolves into MENTOS. That is deliberate and it is the point of this file:
+# a dataset ecstasy scores against must not be able to change because another project
+# rebuilt, moved or deleted a split. It already happened — MENTOS PR #266 replaced the
+# five splits every row here used to name, and `seq_id_30` simply vanished.
+#
+#   kind         loader class; `ecstasy` = a self-contained folder (datasets/ecstasy_native.py)
+#   root         the dataset folder: dataset.yaml + index.parquet + gt/<xx>/<id>.npz
+#   contact_bin  Cβ-Cβ distance-bin threshold; bins < contact_bin are contacts
+#
+# Identity — required on every row, and checked by `ecstasy datasets --verify`:
+#   version           bump when the dataset changes in a way that moves numbers
 #   description       what this split is and why it exists; agents read this
-#   expected_entries  row count. A split is a file that nothing stops from changing
-#                     under a published result, so the count is asserted, not commented.
-#                     The counts below were MEASURED, not copied from the old comments —
-#                     those had already drifted (they claimed 98 / 474 for the pinder
-#                     splits, which actually hold 106 / 454).
+#   expected_entries  row count, asserted rather than trusted. The old comments here had
+#                     already drifted (they claimed 98/474 for the pinder splits, which
+#                     actually held 106/454) — which is why this is a checked field now.
 #   tags              free-form labels for filtering
+#
+# `built_from` — HOW THE FOLDER WAS BUILT, read by `ecstasy import_dataset` and by
+# nothing else. `load_dataset` drops it, so no scoring path can follow it even by
+# accident. It is provenance plus a rebuild recipe, not a data location:
+#
+#   index_sha256   asserted before an import reads a single entry. If the source is
+#                  rebuilt under the same path, the re-import STOPS instead of quietly
+#                  replacing your dataset with a different one of the same name.
+#
+# A row is registered here but its folder is BUILT, not committed. On a fresh machine
+# `ecstasy datasets --verify` says "not built yet" and names the command.
 
-_mentos: &mentos
-  kind: mentos_square
-  gt_root: ${MENTOS_ROOT}/pdb/processed/data
-  split: val
+_ecstasy: &ecstasy
+  kind: ecstasy
   # MUST match MENTOS's CONTACT_LABEL_THRESHOLD_BIN=19 (Cβ-Cβ ≤ 7.9375 Å, bin<19) so
-  # interchain P@K/AUC are directly comparable to the MENTOS benchmark. bin<5 was a
-  # far stricter, non-comparable GT (degenerate median P@K=0). Verified identical to
+  # interchain P@K/AUC stay comparable to the MENTOS benchmark. Verified identical to
   # mentos.metrics.contact_prediction.metrics_inter_chain at bin 19.
+  #
+  # The bin GRID is ecstasy's own: 64 AF2 bins over linspace(2.3125, 21.6875, 63),
+  # recomputed from stored atom37 coordinates by ecstasy.structure.geometry. That
+  # derivation was gated against all 151 MENTOS contact maps and matched exactly.
+  # NOTE a model whose head bins differently needs a different `contact_cutoff_bin` in
+  # its preset — MiniFold bins over linspace(2, 25, 63), where bin 19 is 8.68 Å.
   contact_bin: 19
   version: 1
 
-# MENTOS seq_id_30 val (legacy headline; 1,511 dimers)
-mentos_seqid30:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/seq_id_30/index.parquet
+# ---------------------------------------------------------------------------------
+# MENTOS recent-PP val — the primary validation set, and the only split MENTOS ships.
+# ---------------------------------------------------------------------------------
+recent_pp:
+  <<: *ecstasy
+  root: ${DATA_ROOT}/datasets/recent_pp
   description: >-
-    Legacy headline split: MMseqs clustering at 30% sequence identity. Superseded by the
-    four leakage-controlled val splits below; kept so older results stay reproducible.
-    NOTE: the seq_id_30 directory is absent on CX3, so this row is currently unresolvable
-    there — `ecstasy datasets verify` will say so rather than failing mid-run.
-  expected_entries: 1511
-  tags: [legacy, contact]
+    MENTOS's primary validation split (PR #266), temporally held out: 151 two-chain
+    complexes, 104-1006 residues (median 618), released 2025-06-30 to 2026-01-21 and
+    MMseqs-decontaminated at 40% identity / 0.8 coverage against PDB-train, dropping the
+    WHOLE complex when either chain clusters with a training chain. Built to replicate
+    the ESMFold2 paper's "Comparison with Boltz-2" setting (Candido et al. 2026,
+    doi:10.64898/2026.06.03.729735) and verified constant-by-constant against the
+    source's build_manifest.json. Boltz-2 trains on PDB before 2023-06-01, so the window
+    is genuinely held out for Boltz-2, ESMFold and ESM2 alike. Carries full-atom ground
+    truth, so it scores contacts AND structure (DockQ/iRMSD/LRMSD/TM). When comparing to
+    the paper: it reports DockQ pass rates over predicted 3D structures; a contact P@K
+    here is a different measurement on the same targets, so only the ordering transfers.
+  expected_entries: 151
+  tags: [headline, contact, structure, temporal-holdout]
+  built_from:
+    kind: mentos_square
+    index: ${MENTOS_ROOT}/pdb/processed/splits/val/index.parquet
+    gt_root: ${MENTOS_ROOT}/pdb/processed/data
+    # Load-bearing: that index holds 23,463 PDB-train rows beside the 151 val rows.
+    # The imported folder's index is filtered to the 151, so this is needed once, here.
+    split: val
+    contact_bin: 19
+    index_sha256: 4d504b7e91f5babc76dfefb98e2b4732ca25216eb4aa767224e0dd1a9d506fe0
 
-# Four leakage-controlled val splits (deleaking strategy in the description)
-val_seq_chain:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_chain/index.parquet
-  description: >-
-    V1 deleaking: MMseqs cluster at 30% sequence identity, chain-level. A dimer is held
-    out if either chain clusters with a training chain.
-  expected_entries: 632
-  tags: [deleaked, contact]
+# ---------------------------------------------------------------------------------
+# FoldBench (BEAM-Labs/FoldBench) — low-homology interface test set.
+# Processed by mentos/scripts/data_processing/process_foldbench.py into the same
+# square-GT format. Ids are `<pdb>-assembly1__<c1>_<c2>`, so id[:2] still shards.
+#
+# One source index carries six split values; `foldbench` is the UNION of `foldbench_pp`
+# and `foldbench_abag`, so the same entry appears under two split values. Each dataset
+# below filters its own split and owns its own copy of the ground truth — duplication is
+# accepted so a folder is self-contained (DESIGN D10).
+#
+# The source also carries `foldbench_2024` (155), `foldbench_pp_2024` (96) and
+# `foldbench_abag_2024` (59) — temporal subsets, not registered yet.
+# ---------------------------------------------------------------------------------
+_foldbench_source: &foldbench_source
+  kind: mentos_square
+  index: ${MENTOS_ROOT}/foldbench/processed/index.parquet
+  gt_root: ${MENTOS_ROOT}/foldbench/processed/data
+  contact_bin: 19
+  index_sha256: 8aa3e13ee0f953ed577b16ac6ac9e724c86d5ee565e65fa1b7a3dc743b629072
 
-val_seq_pair:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
+foldbench_pp:
+  <<: *ecstasy
+  root: ${DATA_ROOT}/datasets/foldbench_pp
   description: >-
-    V2 deleaking: MMseqs cluster, pair identity. Held out on the (chainA, chainB) pair
-    rather than either chain alone, so it is more permissive than val_seq_chain.
-  expected_entries: 930
-  tags: [deleaked, contact]
+    FoldBench protein-protein interfaces — the PPI headline. 193 two-chain complexes at
+    low homology to training data. Antibody-antigen targets are excluded, which matters:
+    they are a different prediction problem (CDR-loop-driven, poorly served by
+    coevolution) and pooling them moves the mean without moving the science.
+  expected_entries: 193
+  tags: [headline, contact, structure, foldbench]
+  built_from:
+    <<: *foldbench_source
+    split: foldbench_pp
 
-# Chain-order-permutation experiment: val_seq_pair with each dimer's chains flipped
-# (A,B)->(B,A), GT reindexed to match. ISOLATED (own run dir + own pair-hash MSAs, so
-# MSAs get recalculated from scratch for the flipped order). Tests model order-dependence.
-val_seq_pair_swapped:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_seq_pair/index.parquet
-  swap_chains: true
+foldbench_abag:
+  <<: *ecstasy
+  root: ${DATA_ROOT}/datasets/foldbench_abag
   description: >-
-    val_seq_pair with every dimer's chain order flipped (A,B)->(B,A) and the square GT
-    reindexed to match. Measures how order-dependent a model is; a model that truly reads
-    a complex should score the same here as on val_seq_pair.
-  expected_entries: 930
-  tags: [deleaked, contact, ablation]
+    FoldBench antibody-antigen interfaces. 137 two-chain complexes. Kept separate from
+    foldbench_pp because MSA-based models are expected to do markedly worse here — the
+    interface is determined by hypervariable CDR loops with no coevolutionary signal.
+    Report it beside foldbench_pp, never averaged into it.
+  expected_entries: 137
+  tags: [contact, structure, foldbench, antibody]
+  built_from:
+    <<: *foldbench_source
+    split: foldbench_abag
 
-val_pinder_chain:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_chain/index.parquet
+foldbench:
+  <<: *ecstasy
+  root: ${DATA_ROOT}/datasets/foldbench
   description: >-
-    V3 deleaking: Pinder-style depth-2 walk over a fused interface-monomer graph,
-    chain-level. The strictest and smallest of the four.
-  expected_entries: 106
-  tags: [deleaked, contact]
+    FoldBench union: foldbench_pp (193) + foldbench_abag (137) = 330 complexes. Provided
+    for comparison against papers that report the union; prefer the two component sets,
+    since a union mean is a mixture of two populations a model handles differently.
+  expected_entries: 330
+  tags: [contact, structure, foldbench, union]
+  built_from:
+    <<: *foldbench_source
+    split: foldbench
 
-val_pinder_pair:
-  <<: *mentos
-  index: ${MENTOS_ROOT}/pdb/processed/splits/val_pinder_pair/index.parquet
-  description: >-
-    V4 deleaking: Pinder-style label-propagation on pair identity. The headline split for
-    leakage-controlled interchain contact numbers.
-  expected_entries: 454
-  tags: [deleaked, contact, headline]
+# ---------------------------------------------------------------------------------
+# RETIRED. seq_id_30 and the four deleaked val_* splits (val_seq_chain 632,
+# val_seq_pair 930, val_pinder_chain 106, val_pinder_pair 454) were removed with MENTOS
+# PR #266. seq_id_30's parquet is already gone; the val_* parquets survive only as a
+# stale copy on this cluster's ephemeral storage, and their ground truth was never more
+# than 8-18% present, so none of them could produce a complete result anyway.
+#
+# They are NOT re-registered pointing at that copy — that is exactly the dependency this
+# file just removed. Regenerating them as ecstasy-owned datasets is tracked in an issue;
+# it needs ground truth derived from mmCIF, not a copy of a directory that is one purge
+# away from gone.
+# ---------------------------------------------------------------------------------

@@ -175,6 +175,12 @@ def _sha256_full(path: Path) -> str:
     return h.hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    """Full sha256 of a file. Use when the identity must be exact, not just distinct —
+    a dataset index, where a changed split at the same path is the failure to catch."""
+    return _sha256_full(Path(path))
+
+
 def params_provenance(params: dict, full_hash: bool = False) -> dict:
     """Provenance for every filesystem path appearing in a model's resolved params.
 

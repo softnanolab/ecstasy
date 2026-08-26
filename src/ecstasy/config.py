@@ -33,8 +33,32 @@ _DEFAULTS: dict[str, str] = {k: "" for k in _ROOTS}
 
 
 @lru_cache(maxsize=1)
+def _env_path() -> Path:
+    """The ``.env`` to read: this checkout's, else the main checkout's.
+
+    In a git worktree ``_REPO_ROOT`` is the worktree, which has no ``.env`` — it is
+    gitignored, so it never travels with the branch. Every root then resolved to
+    ``Path("")``, and a run wrote under the wrong tree instead of failing.
+
+    A worktree's ``.git`` is a FILE holding ``gitdir: <main>/.git/worktrees/<name>``,
+    so the main checkout is three parents up from that — findable without shelling out.
+    """
+    local = _REPO_ROOT / ".env"
+    if local.exists():
+        return local
+    dot_git = _REPO_ROOT / ".git"
+    if dot_git.is_file():
+        text = dot_git.read_text().strip()
+        if text.startswith("gitdir:"):
+            main_root = Path(text.split(":", 1)[1].strip()).resolve().parents[2]
+            if (main_root / ".env").exists():
+                return main_root / ".env"
+    return local
+
+
+@lru_cache(maxsize=1)
 def _dotenv() -> dict[str, str]:
-    env_path = _REPO_ROOT / ".env"
+    env_path = _env_path()
     out: dict[str, str] = {}
     if env_path.exists():
         for line in env_path.read_text().splitlines():

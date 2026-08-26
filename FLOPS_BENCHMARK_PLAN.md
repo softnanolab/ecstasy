@@ -1,5 +1,13 @@
 # P@K vs. inference FLOPs — benchmarking plan
 
+> **Stale dataset references.** This plan names `val_pinder_pair` (474 rows, later
+> measured at 454) as the headline split. That split was retired upstream by MENTOS
+> PR #266 and is no longer registered; its ground truth was only ever 37/454 present
+> here, so it could not have produced the headline it is named for. Read
+> `val_pinder_pair` as **`recent_pp`** (151 dimers) throughout. Everything else in this
+> plan — the FLOPs methodology, the 2×MACs convention, the per-protein-distribution
+> argument — is unaffected and still current.
+
 Replace the **params** x-axis with **empirically-measured neural inference FLOPs**, so the
 compute cost of recycles and diffusion is visible. Each decision below was resolved in a
 design review; the rationale is kept so the plan is self-justifying.

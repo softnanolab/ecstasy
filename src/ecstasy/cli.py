@@ -107,27 +107,56 @@ class Ecstasy:
                                allow_partial=allow_partial)
 
     def import_dataset(self, dataset, dest=None, name=None, overwrite=False, limit=None):
-        """Materialise a registered dataset into a self-contained folder.
+        """Build a dataset folder from its `built_from` recipe. Run this once per dataset.
 
-        Copies the index and converts ground truth into ecstasy's pickle-free per-entry
-        format, so the resulting folder can be scored with numpy and pandas alone — no
-        MENTOS, no torch, no unpickling a class that has to stay importable.
+        Converts the source's ground truth into ecstasy's pickle-free per-entry format
+        and writes an index filtered to this dataset's rows, so the resulting folder can
+        be scored with numpy and pandas alone — no MENTOS, no torch, no unpickling a
+        class that has to stay importable, and no dependence on the source surviving.
+
+        The source is read HERE, ONCE. Afterwards nothing on the scoring path can reach
+        it: `built_from` is dropped when a dataset is loaded. That is what lets MENTOS
+        rebuild, move or purge a split without touching a published result.
 
         Reports exactly which entries had no ground truth, so a partial split is a
         visible fact rather than a silently reduced mean later.
 
-        Default destination is $DATA_ROOT/datasets/<name>.
+        Default destination is the row's `root` ($DATA_ROOT/datasets/<name>).
         """
-        from ecstasy.config import settings
-        from ecstasy.datasets.base import load_dataset
-        from ecstasy.datasets.importer import import_from_mentos
+        from ecstasy.datasets.base import dataset_source, load_dataset
+        from ecstasy.datasets.importer import import_from_mentos, source_from_spec
 
-        src = load_dataset(dataset)
+        spec = dataset_source(dataset)
+        if spec is None:
+            raise SystemExit(
+                f"{dataset!r} has no `built_from` recipe in datasets.yaml, so there is "
+                f"nothing to import from. Add one naming the source index and gt_root.")
+        target = load_dataset(dataset)
+        src = source_from_spec(spec, dataset)
         name = name or dataset
-        dest = Path(dest) if dest else settings().DATA_ROOT / "datasets" / name
+        if dest:
+            dest = Path(dest)
+        elif name == dataset:
+            dest = Path(target.root)
+        else:
+            # Renaming without a destination would write a folder called `name` into the
+            # registered dataset's own root, overwriting it under a different identity.
+            from ecstasy.config import settings
+            dest = settings().DATA_ROOT / "datasets" / name
+        identity = {
+            "version": target.version,
+            "description": target.description,
+            "tags": target.tags,
+            "contact_bin": getattr(target, "contact_bin", 19),
+            "partial_import": limit is not None,
+        }
         report = import_from_mentos(src, dest, name=name, overwrite=overwrite,
-                                    limit=limit)
+                                    limit=limit, identity=identity)
         print(report.summary())
+        if limit is not None:
+            print(f"\nPARTIAL: limited to {limit} entries. The folder is marked "
+                  f"partial_import and `ecstasy datasets --verify` will say so — it is "
+                  f"a smoke test, not {name}.")
         if not report.complete:
             print("\nIncomplete. The folder is usable for the entries it has, but a run "
                   "over it will be partial and `ecstasy score` will refuse a headline "

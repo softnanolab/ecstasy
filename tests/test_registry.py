@@ -19,15 +19,14 @@ def test_var_resolution():
 
 def test_datasets_registered():
     names = dataset_names()
-    for n in ("mentos_seqid30", "val_seq_chain", "val_seq_pair",
-              "val_pinder_chain", "val_pinder_pair"):
+    for n in ("recent_pp", "foldbench_pp", "foldbench_abag", "foldbench"):
         assert n in names
 
 
 def test_dataset_loads_and_resolves_paths():
-    d = load_dataset("val_pinder_pair")
-    assert d.name == "val_pinder_pair"
-    assert "${" not in str(d.index) and str(d.index).endswith("val_pinder_pair/index.parquet")
+    d = load_dataset("recent_pp")
+    assert d.name == "recent_pp"
+    assert "${" not in str(d.index) and str(d.index).endswith("recent_pp/index.parquet")
     assert d.contact_bin == 19
 
 
@@ -105,11 +104,11 @@ def test_msa_backends_registered():
 
 
 def test_experiment_expands_matrix():
-    m = {"name": "t", "datasets": ["val_seq_chain", "val_pinder_pair"],
+    m = {"name": "t", "datasets": ["recent_pp", "foldbench_pp"],
          "runs": [{"model": "boltz2", "preset": "full"},
                   {"model": "boltz2", "preset": "full", "set": {"recycling_steps": 5}}]}
     runs = experiment.expand(m)
     assert len(runs) == 4                       # 2 datasets × 2 run specs
     variants = {(r.dataset.name, r.model.variant) for r in runs}
-    assert ("val_seq_chain", "full") in variants
+    assert ("recent_pp", "full") in variants
     assert any(v.startswith("full+") for _, v in variants)

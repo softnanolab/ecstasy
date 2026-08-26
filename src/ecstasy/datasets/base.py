@@ -278,11 +278,29 @@ def dataset_manifests() -> list[dict]:
     return [load_dataset(n).manifest() for n in dataset_names()]
 
 
+def dataset_source(name: str) -> dict | None:
+    """The ``built_from`` recipe for a dataset, or None if it has none.
+
+    Read ONLY by ``ecstasy import_dataset``. A row's ``built_from`` records where the
+    folder was originally converted from — it is provenance, not a data path, and
+    nothing on the scoring path may consult it. That separation is the whole point:
+    once imported, a dataset survives its source being changed, moved or purged.
+    """
+    reg = _registry()
+    if name not in reg or name.startswith("_"):
+        raise KeyError(f"unknown dataset {name!r}; registered: {dataset_names()}")
+    spec = reg[name].get("built_from")
+    return resolve(dict(spec)) if spec else None
+
+
 def load_dataset(name: str) -> Dataset:
     reg = _registry()
     if name not in reg or name.startswith("_"):
         raise KeyError(f"unknown dataset {name!r}; registered: {dataset_names()}")
     row = resolve(dict(reg[name]))  # expand ${VAR}; copy so we can pop
+    # `built_from` is the import recipe, not part of the dataset's own identity, and is
+    # dropped here so no loader can reach the source tree at score time even by accident.
+    row.pop("built_from", None)
     kind = row.pop("kind")
     # import loaders so they self-register via __init_subclass__
     from ecstasy.datasets import ecstasy_native, mentos  # noqa: F401
