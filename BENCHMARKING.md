@@ -54,8 +54,19 @@ that has to stay importable.
 |---|---|---|
 | `recent_pp` | 151 | MENTOS's primary validation split, temporally held out. Full-atom GT, so it scores contacts **and** structure (DockQ/iRMSD/LRMSD/TM). The headline set. |
 | `foldbench_pp` | 193 | FoldBench protein-protein interfaces — the PPI headline |
+| `foldbench_pp_post2024` | 96 | the 193 restricted to releases on/after 2024-01-01 — FoldBench's post-2024 leaderboard. The only set that is **both** homology-controlled and temporally held out |
 | `foldbench_abag` | 137 | FoldBench antibody-antigen. Report beside `foldbench_pp`, never averaged in |
-| `foldbench` | 330 | the union of the two above |
+| `foldbench` | 330 | the union of `foldbench_pp` and `foldbench_abag` |
+
+Two of these **overlap**: `foldbench_pp_post2024` is a strict subset of `foldbench_pp`,
+and `foldbench` contains both `foldbench_pp` and `foldbench_abag`. Overlapping sets are
+not independent evidence — report them side by side, never pooled, and never as if a
+model had been tested on 619 complexes.
+
+A dataset's name and its `built_from` split value need not match, and here deliberately
+do not: the source calls the post-2024 set `foldbench_pp_2024`, which names a year
+without saying on which side of it the entries fall. The recipe records the source's
+name; the row uses the one that says what the split *is*.
 
 ## CLI
 

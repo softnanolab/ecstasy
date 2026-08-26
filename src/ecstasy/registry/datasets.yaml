@@ -108,6 +108,42 @@ foldbench_pp:
     <<: *foldbench_source
     split: foldbench_pp
 
+# FoldBench publishes a SECOND leaderboard over the targets released after 2024-01, and
+# this is that set for the PPI category. Named for the cut it makes: the source calls it
+# `foldbench_pp_2024`, which does not say in which direction, and the direction is the
+# whole content of the split.
+#
+# Verified against the source's own release_dates.json rather than taken on trust:
+# a strict subset of foldbench_pp (96 of 193), in-subset releases run 2024-01-03 to
+# 2024-10-30 with none before the cutoff, the excluded 97 top out at 2023-12-27, and no
+# target is missing a date.
+#
+# The cutoff comes from mentos `configs/foldbench.yaml: release_date_cutoff: 2024-01-01`,
+# and the dates from the RCSB API — FoldBench's ground-truth CIFs are anonymised
+# (`data_XXXX`, no revision history), so the date cannot be read off the structure.
+#
+# WHY IT MATTERS: this is the only registered set that is BOTH homology-controlled (by
+# FoldBench's selection) and temporally held out. recent_pp is temporal only;
+# foldbench_pp is homology only. At n=96 report the paired per-target comparison, not a
+# difference of means — two targets swinging moves a mean visibly at this size.
+foldbench_pp_post2024:
+  <<: *ecstasy
+  root: ${DATA_ROOT}/datasets/foldbench_pp_post2024
+  description: >-
+    FoldBench protein-protein interfaces released on or after 2024-01-01 — the subset
+    behind FoldBench's post-2024 leaderboard. 96 of foldbench_pp's 193 complexes, so it
+    is homology-controlled by FoldBench's selection AND temporally held out, the only
+    registered set that is both. Release dates are RCSB's initial_release_date, resolved
+    via the API because the distributed CIFs are anonymised. Overlaps foldbench_pp
+    entirely: never report the two as independent evidence, and never pool them.
+  expected_entries: 96
+  tags: [contact, structure, foldbench, temporal-holdout, subset-of:foldbench_pp]
+  built_from:
+    <<: *foldbench_source
+    # The SOURCE's split value, which differs from this dataset's name on purpose —
+    # `_2024` names a year, `post2024` names a cut.
+    split: foldbench_pp_2024
+
 foldbench_abag:
   <<: *ecstasy
   root: ${DATA_ROOT}/datasets/foldbench_abag
