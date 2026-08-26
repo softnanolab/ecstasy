@@ -72,7 +72,7 @@ class Ecstasy:
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
             profile=False, checkpoint=None, shard=None, force=False,
-            allow_partial=False):
+            allow_partial=False, null_draws=0):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
         --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
@@ -92,10 +92,11 @@ class Ecstasy:
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
             pipeline.run_predict(r, limit=limit, profile=profile, shard=shard, force=force)
             if not no_score:
-                pipeline.run_score(r, limit=limit, allow_partial=allow_partial)
+                pipeline.run_score(r, limit=limit, allow_partial=allow_partial,
+                                   null_draws=null_draws)
 
     def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None,
-              metrics=None, allow_partial=False):
+              metrics=None, allow_partial=False, null_draws=0):
         """Score existing predictions over the dataset×model matrix.
 
         --metrics 'P@K,P@K(tol=2)' selects registered metrics by name; see
@@ -104,7 +105,7 @@ class Ecstasy:
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
             pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None,
-                               allow_partial=allow_partial)
+                               allow_partial=allow_partial, null_draws=null_draws)
 
     def import_dataset(self, dataset, dest=None, name=None, overwrite=False, limit=None):
         """Build a dataset folder from its `built_from` recipe. Run this once per dataset.
