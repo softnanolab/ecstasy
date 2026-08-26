@@ -149,3 +149,57 @@ colabfold:
   default_preset: single_seq
   presets:
     single_seq: {msa_mode: single_sequence, num_recycle: 3, contact_cutoff_bin: 19}
+
+# MiniFold (Wohlwend et al., TMLR 2025) — ESM2-3B + a 48-block miniformer trunk + an
+# OpenFold structure module. Single-chain: it has never seen a complex. Run on dimers
+# through the same poly-G-linker + positional-index-skip hack as the `esmfold` row, it is
+# the third-party reference point for MENTOS's docking — a strong monomer folder with no
+# docking ability, scored identically. It is the first row to emit a structure.npz, so it
+# is the first scored with DockQ as well as P@K.
+#
+# contact_cutoff_bin is 17, NOT the 19 every other row uses. Bins are EDGES and the models
+# bin differently: MiniFold's checkpoint has no_bins=64 / max_dist=25, so its boundaries
+# are linspace(2, 25, 63) and bin 19 would mean 8.68 A where ESMFold's bin 19 means
+# 7.94 A. Bin 17 reproduces 7.9355 A. Do NOT "harmonise" this to 19 — that is the bug,
+# not the fix. Copying 19 across would quietly inflate MiniFold's P@K against every other
+# model. The runner's module docstring carries the derivation.
+#
+# CAVEAT no bin index can fix: MiniFold's distogram is CA-CA, while ecstasy's ground truth
+# and every other head here are Cb-Cb. State that wherever MiniFold's P@K is published.
+#
+# FLOPs scope differs too: unlike ESMFold, MiniFold's structure module is NOT on the
+# contact-map path, so flops.json records `scope: full_model_incl_structure_module` —
+# right for DockQ, an over-count for P@K.
+#
+# Install: scripts/install/minifold.sh — it clones upstream and applies the residx patch,
+# without which the index jump never reaches the trunk and the linker-only variant is
+# measured silently. The runner refuses to run against an unpatched tree.
+minifold:
+  runner: minifold_runner.py
+  env: ${ENVS_ROOT}/.venv-minifold
+  msa: none
+  default_preset: full
+  # Machine paths, shared by every preset. Ignored by the loader (which reads only
+  # runner/env/msa/presets/default_preset/infra); it exists to keep the checkpoint path
+  # in one place. To benchmark the 12L checkpoint, add a preset overriding `checkpoint`.
+  _paths: &minifold_paths
+    checkpoint: ${ECSTASY_ROOT}/weights/minifold/minifold_48L.ckpt
+    minifold_src: ${ECSTASY_ROOT}/src/minifold
+    torch_hub_dir: ${ECSTASY_ROOT}/weights/minifold/cache
+  presets:
+    # 25-residue poly-G linker (MiniFold's own default, and esmfold's `full`) + a 512
+    # positional-index skip. num_recycles 3 is the checkpoint's trained setting.
+    full:
+      <<: *minifold_paths
+      num_recycles: 3
+      chain_linker_length: 25
+      residue_index_offset: 512
+      contact_cutoff_bin: 17
+    # Linker matched to esmfold's `glinker32`, for a like-for-like comparison of the two
+    # folders under an identical chain break.
+    glinker32:
+      <<: *minifold_paths
+      num_recycles: 3
+      chain_linker_length: 32
+      residue_index_offset: 512
+      contact_cutoff_bin: 17
