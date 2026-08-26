@@ -38,7 +38,7 @@ def test_unknown_dataset_raises():
 def test_models_registered_with_presets():
     assert set(model_names()) == {"boltz2", "boltz2_nomsa", "esmfold", "mentos",
                                   "colabfold", "msa_pairformer", "esm2",
-                                  "plmgraph_inter", "deepinteract"}
+                                  "plmgraph_inter", "deepinteract", "minifold"}
     assert presets_for("boltz2") == ["fast", "full", "r0", "r1", "r3", "r5"]
     # esm2 sweeps model size (no recycles); presets are the fair-esm size tiers.
     assert presets_for("esm2") == ["t12_35M", "t30_150M", "t33_650M", "t36_3B", "t6_8M"]

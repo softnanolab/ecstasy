@@ -1,0 +1,31 @@
+--- a/minifold/model/model.py
++++ b/minifold/model/model.py
+@@ -130,7 +130,7 @@
+         torch.nn.init.zeros_(self.seq_to_pair.o_proj.weight)
+         torch.nn.init.zeros_(self.seq_to_pair.o_proj.bias)
+ 
+-    def forward(self, s_s, s_z, mask, num_recycling=0):
++    def forward(self, s_s, s_z, mask, num_recycling=0, residx=None):
+         """
+         Inputs:
+           s_s_0:     B x L x C            tensor of sequence features
+@@ -144,8 +144,9 @@
+         pair_mask = mask[:, None, :] * mask[:, :, None]
+ 
+         # Add positional embeddings
+-        residx = torch.arange(s_s.shape[1], device=s_s.device)
+-        residx = residx.unsqueeze(0).expand(s_s.shape[0], -1)
++        if residx is None:
++            residx = torch.arange(s_s.shape[1], device=s_s.device)
++            residx = residx.unsqueeze(0).expand(s_s.shape[0], -1)
+ 
+         # Concatenate and project
+         s_z = torch.cat(
+@@ -295,6 +296,7 @@
+             s_z,
+             mask=batch["mask"],
+             num_recycling=num_recycling,
++            residx=batch.get("residx"),
+         )
+ 
+         # Prepare output
