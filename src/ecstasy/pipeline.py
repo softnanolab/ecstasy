@@ -29,6 +29,10 @@ from ecstasy.msa import store
 #: Columns the comparison table reports. The scored metric set is per-run and lives in
 #: result.json["metrics"]; this is only what `compare` puts in its fixed columns.
 _METRIC_KEYS = ["AUC", "P@K", "P@K/2", "P@K/5"]
+#: Structure keys aggregated when a run produced them. Order is the reporting order, and
+#: it puts the RMSD terms immediately after DockQ on purpose — see `_structure_summary`.
+_STRUCTURE_KEYS = ["DockQ", "Fnat", "iRMSD", "LRMSD", "TM_mean", "TM_min",
+                   "CA_RMSD_mean", "null_DockQ_mean", "null_DockQ_max"]
 
 
 @dataclass(frozen=True)
@@ -185,12 +189,13 @@ def run_predict(run: Run, limit: int | None = None, profile: bool = False,
 
 def run_score(run: Run, limit: int | None = None,
               metrics: tuple[str, ...] | None = None,
-              allow_partial: bool = False) -> None:
+              allow_partial: bool = False, null_draws: int = 0) -> None:
     metrics = tuple(metrics) if metrics else DEFAULT_CONTACT_METRICS
     scoring_fp = run.check_scoring_fingerprint(metrics)
     per_protein: dict[str, dict] = {}
     skipped: list[tuple[str, str]] = []
     errors: list[tuple[str, str]] = []
+    struct_skipped: list[tuple[str, str]] = []
     n = 0
     for entry in run.dataset.entries():
         if limit is not None and n >= int(limit):
@@ -210,10 +215,28 @@ def run_score(run: Run, limit: int | None = None,
             continue
         if "_skipped" in res:
             skipped.append((entry.id, res["_skipped"]))
-        elif "_error" in res:
+            continue
+        if "_error" in res:
             errors.append((entry.id, res["_error"]))
-        else:
-            per_protein[entry.id] = {k: float(v) for k, v in res.items()}
+            continue
+        res = dict(res)
+        # Structure scoring is strictly additive: it runs only when the model emitted a
+        # structure AND the dataset has full-atom GT, and a failure here never discards
+        # the contact metrics this target already earned.
+        structure_path = run.predictions_dir / entry.id / "structure.npz"
+        if structure_path.exists() and run.dataset.has_structure_gt:
+            try:
+                s = run.dataset.score_structure(
+                    entry, structure_path, work_dir=structure_path.parent,
+                    null_draws=null_draws)
+            except Exception as e:  # noqa: BLE001
+                struct_skipped.append((entry.id, f"{type(e).__name__}: {e}"))
+            else:
+                if "_skipped" in s or "_error" in s:
+                    struct_skipped.append((entry.id, s.get("_skipped") or s["_error"]))
+                else:
+                    res.update(s)
+        per_protein[entry.id] = {k: float(v) for k, v in res.items()}
 
     # Coverage is scoped to what was actually asked for: with --limit N the run only ever
     # intended N targets, so completeness is measured against that, not the whole split.
@@ -245,8 +268,14 @@ def run_score(run: Run, limit: int | None = None,
     # written either way, so nothing is lost by refusing.
     if not complete:
         aggregate["summary"]["partial"] = True
+    if struct_skipped:
+        aggregate["summary"]["n_structure_skipped"] = len(struct_skipped)
+        aggregate["structure_skipped_first_20"] = struct_skipped[:20]
     if per_protein and (complete or allow_partial):
         aggregate["summary"].update(_summarise(per_protein, metrics))
+        scored = [v for v in per_protein.values() if "DockQ" in v]
+        if scored:
+            aggregate["summary"]["structure"] = _structure_summary(scored)
     elif not complete:
         aggregate["summary"]["partial_reason"] = (
             f"scored {len(per_protein)}/{n_intended} targets ({covered:.1%}). No headline "
@@ -274,6 +303,50 @@ def _summarise(per_protein: dict[str, dict], metrics: tuple[str, ...]) -> dict:
     }
 
 
+def _structure_summary(rows: list[dict]) -> dict:
+    """DockQ summary: central tendency, quality bands, and the homodimer split.
+
+    Three things here are deliberate, each because reporting it the other way produced a
+    wrong conclusion on this codebase (see CLAUDE.md):
+
+    * **iRMSD and LRMSD sit beside DockQ, always.** DockQ averages fnat with two RMSD
+      terms, so a model that has docked nothing still scores — and scores highest exactly
+      where its geometry is worst.
+    * **`mean` is listed before `median`.** Median is the statistic the fnat floor
+      corrupts most; a median-led reading of this benchmark has inverted the ranking of
+      two models more than once.
+    * **The homodimer split is NAMED for the definition it uses.** "Homodimer" has meant
+      two different things on the same split — the dataset flag (129 of 151) and exact
+      chain-sequence equality (39) — because sequences can differ purely in how much was
+      experimentally resolved. The key says which was used; the dataset's
+      ``composition()`` carries the full identity distribution for any other threshold.
+    """
+    from ecstasy.metrics.structure import dockq_bands
+
+    def finite(key):
+        return [v[key] for v in rows if not np.isnan(v.get(key, np.nan))]
+
+    out: dict = {"n": len(rows)}
+    out.update(_summarise({str(i): r for i, r in enumerate(rows)}, _STRUCTURE_KEYS))
+    out.update(dockq_bands(finite("DockQ")))
+
+    labelled = [v for v in rows if "is_homodimer" in v]
+    if labelled:
+        groups = {"homodimer_flag": [v for v in labelled if v["is_homodimer"] >= 0.5],
+                  "heterodimer_flag": [v for v in labelled if v["is_homodimer"] < 0.5]}
+        out["split_definition"] = ("dataset is_homodimer flag; see dataset.composition() "
+                                   "for the chain-identity distribution")
+        for label, subset in groups.items():
+            if not subset:
+                continue
+            scores = [v["DockQ"] for v in subset if not np.isnan(v.get("DockQ", np.nan))]
+            out[label] = {"n": len(subset),
+                          **_summarise({str(i): r for i, r in enumerate(subset)},
+                                       _STRUCTURE_KEYS),
+                          **dockq_bands(scores)}
+    return out
+
+
 def _print_result(run: Run, aggregate: dict) -> None:
     s = aggregate["summary"]
     if "mean" in s:
@@ -281,6 +354,13 @@ def _print_result(run: Run, aggregate: dict) -> None:
         print(f"[{run.dataset.name}/{run.model.name}/{run.model.variant}] "
               f"n={s['n_evaluated']} {headline} "
               f"skipped={s['n_skipped']} errors={s['n_errors']}")
+    if "structure" in s:
+        st = s["structure"]
+        # iRMSD/LRMSD printed with DockQ, never without — see _structure_summary.
+        print(f"  structure n={st['n']} DockQ mean={st['mean']['DockQ']:.3f} "
+              f"median={st['median']['DockQ']:.3f} "
+              f"iRMSD={st['mean']['iRMSD']:.2f}A LRMSD={st['mean']['LRMSD']:.2f}A "
+              f"acceptable={st['acceptable_fraction']:.3f}")
     if s.get("partial_reason"):
         print(f"[partial] {s['partial_reason']}")
     elif s.get("partial"):
