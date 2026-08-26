@@ -212,6 +212,65 @@ class Ecstasy:
         """Aggregate all runs for a dataset into comparison.{csv,md}."""
         pipeline.run_compare(dataset)
 
+    def publish(self, dataset, model, preset=None, set=None, checkpoint=None,
+                allow_partial=False, allow_dirty=False, again=False, report=True):
+        """Append a scored run to the committed record (`results/runs.jsonl`).
+
+        Deliberate, never automatic: a `--limit 1` smoke and an abandoned experiment
+        must not silently become the number other people quote.
+
+        A row is keyed by dataset, model, variant and BOTH fingerprints, so re-scoring
+        after a metric fix appends a new row against identical predictions rather than
+        editing the old one — `git log -p results/runs.jsonl` then shows a number moving
+        and what changed underneath it. Re-publishing identical fingerprints is refused
+        (`--again` records a deliberate repeat).
+
+        Summaries only; per-protein detail stays in $DATA_ROOT. Regenerates
+        results/LEADERBOARD.md unless --report=False. Commit both together.
+        """
+        from ecstasy import report as report_mod
+        from ecstasy import results
+
+        for r in _matrix(dataset, model, preset, set, checkpoint):
+            if not r.result_path.exists():
+                raise SystemExit(
+                    f"{r.dataset.name} x {r.model.name}/{r.model.variant} has no "
+                    f"result.json at {r.result_path}. Score it first.")
+            try:
+                rec, note = results.publish(
+                    r.result_path, allow_partial=allow_partial,
+                    allow_dirty=allow_dirty, again=again)
+            except results.PublishRefused as e:
+                raise SystemExit(str(e)) from None
+            key = results.Key.from_record(rec)
+            print(f"published {key.short()}")
+            if note:
+                print(f"  note: {note}")
+            mean = (rec["metrics"].get("mean") or {})
+            if mean:
+                print("  " + "  ".join(f"{k}={v:.4f}" for k, v in mean.items()
+                                       if isinstance(v, float)))
+            st = (rec.get("structure") or {}).get("mean") or {}
+            if st:
+                print(f"  DockQ={st.get('DockQ', float('nan')):.4f} "
+                      f"iRMSD={st.get('iRMSD', float('nan')):.2f}A "
+                      f"LRMSD={st.get('LRMSD', float('nan')):.2f}A")
+        if report:
+            print(f"\nleaderboard -> {report_mod.write()}")
+
+    def report(self, out=None, show=False):
+        """Regenerate results/LEADERBOARD.md from the committed results.
+
+        Reads only `results/runs.jsonl`, so it needs no network, no token and no
+        $DATA_ROOT — an agent picking up a task can see what has already been
+        benchmarked from the repo alone.
+        """
+        from ecstasy import report as report_mod
+        if show:
+            print(report_mod.render())
+            return
+        print(f"leaderboard -> {report_mod.write(out)}")
+
     def experiment(self, manifest, limit=None, no_score=False):
         """Run a dataset×model sweep from a manifest YAML."""
         experiment.run_experiment(manifest, limit=limit, score=not no_score)

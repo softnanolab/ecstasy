@@ -77,6 +77,8 @@ ecstasy import_dataset --dataset D             # build a dataset folder from bui
 ecstasy run     --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N] [--no_score]
 ecstasy score   --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N]
 ecstasy compare --dataset D                    # comparison.{csv,md} across all runs
+ecstasy publish --dataset D --model M          # append to the committed record
+ecstasy report  [--show]                       # regenerate results/LEADERBOARD.md
 ecstasy msa     --datasets D[,D] --kind per_chain|complex [--phase prepare|submit|ingest]
 ecstasy experiment experiments/<name>/manifest.yaml [--limit N] [--no_score]
 ```
@@ -126,6 +128,44 @@ Scoring an imported dataset needs only numpy and pandas — the ground truth is
 ecstasy's own `.npz`, not a MENTOS pickle. MENTOS is needed **once**, by
 `import_dataset`, to read the source samples; after that no scoring environment
 requires it.
+
+## Publishing a result
+
+Results used to live only in `$DATA_ROOT` — machine-local, gitignored, copied into
+Notion by hand. So no benchmark number was versioned, a PR could not show that a
+change had moved one, and an agent with no token could not find out what had already
+been measured.
+
+`results/runs.jsonl` is the committed record; `results/LEADERBOARD.md` is generated
+from it. Commit both together.
+
+```bash
+ecstasy publish --dataset recent_pp --model minifold --preset full
+```
+
+**Publishing is deliberate.** Nothing publishes itself, so a `--limit 1` smoke or an
+abandoned experiment never becomes the number someone quotes. It refuses:
+
+| refusal | why | override |
+|---|---|---|
+| incomplete coverage | a mean over part of a split prints identically to a mean over all of it | `--allow_partial` |
+| any errored target | | — (fix the run) |
+| a dirty ecstasy tree | `ecstasy_sha` would name a commit that does not contain the code that produced the number | `--allow_dirty` |
+| identical fingerprints to an existing row | same inputs to prediction *and* scoring means the same measurement, not a new one | `--again` |
+
+A dirty **model** tree is *not* refused. MiniFold is benchmarked with the `residx`
+patch applied to its working tree — that is the intended experiment and it is
+permanent, so a gate every MiniFold publish had to override would just be a habit of
+typing `--allow_dirty`. The dirty flag and file list go on the row, and the leaderboard
+marks it `†`.
+
+Rows are keyed by dataset, model, variant and **both** fingerprints. Re-scoring after a
+metric fix therefore appends a new row against identical predictions rather than
+editing the old one, so `git log -p results/runs.jsonl` shows a number moving *and*
+what changed underneath it.
+
+Summaries only — per-protein detail stays in `$DATA_ROOT`. The repo keeps numbers you
+can diff, not blobs.
 
 ## Notes
 
