@@ -14,15 +14,17 @@ from typing import Iterable
 import numpy as np
 
 from ecstasy.datasets.base import Dataset, Entry
-from ecstasy.metrics.contact import pak_inter_chain
 
 
 class MentosSquareDataset(Dataset):
     kind = "mentos_square"
 
     def __init__(self, name: str, index: str, gt_root: str, split: str = "val",
-                 contact_bin: int = 5, swap_chains: bool = False):
-        super().__init__(name)
+                 contact_bin: int = 5, swap_chains: bool = False, **meta):
+        # `meta` carries the row's identity fields (version/description/expected_entries/
+        # tags). Passing them through rather than accepting **kwargs blindly means a
+        # typo'd key in datasets.yaml raises here instead of being silently ignored.
+        super().__init__(name, **meta)
         self.index = Path(index)
         self.gt_root = Path(gt_root)
         self.split = split
@@ -31,6 +33,15 @@ class MentosSquareDataset(Dataset):
         # order (A,B)->(B,A) at input AND reindex the square GT to match, so the model
         # is scored on the same interface seen in flipped order. Monomers pass through.
         self.swap_chains = bool(swap_chains)
+
+    def source_paths(self) -> dict[str, Path]:
+        return {"index": self.index, "gt_root": self.gt_root}
+
+    def gt_path(self, entry_id: str) -> Path:
+        return self.gt_root / entry_id[:2] / f"{entry_id}.pt"
+
+    def has_gt(self, entry_id: str) -> bool:
+        return self.gt_path(entry_id).exists()
 
     @staticmethod
     def _swap_perm(la: int, L: int) -> np.ndarray:
@@ -57,8 +68,7 @@ class MentosSquareDataset(Dataset):
         # /home/.../mentos), so torch.load resolves the class natively — no rename
         # shim. (Lazy torch import: only a scoring env reaches here, never the
         # torch-less orchestrator. See the mentos_package_and_venvs memory.)
-        p = self.gt_root / entry_id[:2] / f"{entry_id}.pt"
-        sample = torch.load(p, weights_only=False, map_location="cpu")
+        sample = torch.load(self.gt_path(entry_id), weights_only=False, map_location="cpu")
         # bin < contact_bin == contact; -1 (unresolved) must NOT count as contact.
         raw = sample.contact_map.numpy()
         contact_map = (raw >= 0) & (raw < self.contact_bin)
@@ -72,20 +82,5 @@ class MentosSquareDataset(Dataset):
             contact_map = contact_map[np.ix_(perm, perm)]
             valid = valid[np.ix_(perm, perm)]
             seqs = [seqs[1], seqs[0]]
-        return {"contact_map": contact_map, "valid": valid, "sequences": seqs}
-
-    def score(self, entry: Entry, contact_path: Path) -> dict[str, float]:
-        d = np.load(contact_path)
-        probs = np.asarray(d["probs"], dtype=np.float32)
-        gt = self.gt_for(entry.id)
-        contact_gt = gt["contact_map"]
-        valid = gt["valid"]
-        seqs = gt["sequences"]
-        if len(seqs) != 2:
-            return {"_skipped": "non-dimer"}
-        la, lb = len(seqs[0]), len(seqs[1])
-        L = la + lb
-        if probs.shape[0] != L or contact_gt.shape[0] != L:
-            return {"_error": f"shape mismatch: probs={probs.shape}, gt={contact_gt.shape}, L={L}"}
-        chain_ids = np.array([0] * la + [1] * lb)
-        return pak_inter_chain(probs, contact_gt, chain_ids, valid=valid)
+        return {"contact_map": contact_map, "valid": valid, "sequences": seqs,
+                "is_homodimer": sample.is_homodimer}

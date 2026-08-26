@@ -25,9 +25,14 @@ class _FakeDataset(Dataset):
     def gt_for(self, entry_id):  # unused by the fake score
         raise NotImplementedError
 
-    def score(self, entry, contact_path):
-        # contact_path only needs to exist; return fixed metrics
-        return {"AUC": 0.8, "P@K": 0.5, "P@K/2": 0.6, "P@K/5": 0.7, "K": 4}
+    def score(self, entry, contact_path, metrics=None):
+        # contact_path only needs to exist; return fixed metrics. `metrics` is recorded
+        # so a test can assert the requested set actually reached the loader.
+        self.last_metrics = metrics
+        fixed = {"AUC": 0.8, "P@K": 0.5, "P@K/2": 0.6, "P@K/5": 0.7,
+                 "P@K(tol=2)": 0.9, "K": 4}
+        keys = list(metrics) if metrics else ["AUC", "P@K", "P@K/2", "P@K/5"]
+        return {k: fixed[k] for k in keys if k in fixed} | {"K": fixed["K"]}
 
 
 @pytest.fixture

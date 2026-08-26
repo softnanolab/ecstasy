@@ -12,6 +12,9 @@
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import fire
 
 from ecstasy.datasets import dataset_names
@@ -68,7 +71,8 @@ class Ecstasy:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
-            profile=False, checkpoint=None, shard=None):
+            profile=False, checkpoint=None, shard=None, force=False,
+            allow_partial=False):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
         --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
@@ -78,17 +82,101 @@ class Ecstasy:
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
         --shard 'i/N' processes only every N-th entry (offset i) for parallel jobs;
         combined with the contact.npz skip the shards never collide and are resumable.
+        --force recomputes when the prediction inputs changed (model code, weights,
+        params, dataset index). Without it such a run is REFUSED, because reusing the
+        cached predictions would mix outputs from two code versions into one result
+        that looks entirely normal.
+        --allow_partial permits a headline mean over an incomplete set of targets.
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
-            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard)
+            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard, force=force)
             if not no_score:
-                pipeline.run_score(r, limit=limit)
+                pipeline.run_score(r, limit=limit, allow_partial=allow_partial)
 
-    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None):
-        """Score existing predictions over the dataset×model matrix."""
+    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None,
+              metrics=None, allow_partial=False):
+        """Score existing predictions over the dataset×model matrix.
+
+        --metrics 'P@K,P@K(tol=2)' selects registered metrics by name; see
+        `ecstasy metrics`. Defaults to the canonical set, so adding a metric to the
+        registry never silently changes a headline number.
+        """
         for r in _matrix(dataset, model, preset, set, checkpoint):
-            pipeline.run_score(r, limit=limit)
+            pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None,
+                               allow_partial=allow_partial)
+
+    def import_dataset(self, dataset, dest=None, name=None, overwrite=False, limit=None):
+        """Materialise a registered dataset into a self-contained folder.
+
+        Copies the index and converts ground truth into ecstasy's pickle-free per-entry
+        format, so the resulting folder can be scored with numpy and pandas alone — no
+        MENTOS, no torch, no unpickling a class that has to stay importable.
+
+        Reports exactly which entries had no ground truth, so a partial split is a
+        visible fact rather than a silently reduced mean later.
+
+        Default destination is $DATA_ROOT/datasets/<name>.
+        """
+        from ecstasy.config import settings
+        from ecstasy.datasets.base import load_dataset
+        from ecstasy.datasets.importer import import_from_mentos
+
+        src = load_dataset(dataset)
+        name = name or dataset
+        dest = Path(dest) if dest else settings().DATA_ROOT / "datasets" / name
+        report = import_from_mentos(src, dest, name=name, overwrite=overwrite,
+                                    limit=limit)
+        print(report.summary())
+        if not report.complete:
+            print("\nIncomplete. The folder is usable for the entries it has, but a run "
+                  "over it will be partial and `ecstasy score` will refuse a headline "
+                  "mean without allow_partial=True.")
+        return None
+
+    def metrics(self, kind=None, json_out=False):
+        """List registered metrics — the reusable set available to any run or plot."""
+        from ecstasy.metrics import registry
+        rows = registry.describe(kind=kind)
+        if json_out:
+            print(json.dumps(rows, indent=1))
+            return
+        for m in rows:
+            params = f"  {m['params']}" if m["params"] else ""
+            arrow = "higher is better" if m["higher_is_better"] else "lower is better"
+            print(f"  {m['name']:18} [{m['kind']}, {arrow}]{params}\n"
+                  f"      {m['description']}")
+
+    def datasets(self, verify=False, json_out=False):
+        """Describe registered datasets; --verify checks each split against its row.
+
+        `verify` walks each index and reports entry-count drift — a split is a file that
+        nothing stops from changing under a published result, so the declared
+        `expected_entries` is asserted rather than trusted.
+        """
+        from ecstasy.datasets.base import dataset_manifests, dataset_names, load_dataset
+        if verify:
+            reports = [load_dataset(n).verify() for n in dataset_names()]
+            if json_out:
+                print(json.dumps(reports, indent=1))
+            else:
+                for r in reports:
+                    mark = "ok  " if r["ok"] else "FAIL"
+                    print(f"  [{mark}] {r['name']:24} n={r['n_entries']} "
+                          f"expected={r['expected_entries']}")
+                    for p in r["problems"]:
+                        print(f"         - {p}")
+            if any(not r["ok"] for r in reports):
+                raise SystemExit(1)
+            return
+        manifests = dataset_manifests()
+        if json_out:
+            print(json.dumps(manifests, indent=1))
+            return
+        for m in manifests:
+            print(f"  {m['name']:24} v{m['version']}  n={m['expected_entries']}  "
+                  f"tags={','.join(m['tags'])}")
+            print(f"      {' '.join((m['description'] or '(no description)').split())}")
 
     def compare(self, dataset):
         """Aggregate all runs for a dataset into comparison.{csv,md}."""
