@@ -31,7 +31,8 @@ rebuild a split, rename it, or lose its ephemeral storage without touching a
 published ecstasy result. That is not hypothetical — MENTOS PR #266 retired the
 five splits every row here used to name, and `seq_id_30`'s parquet is gone.
 
-A folder is hundreds of MB, so it is **built on each machine**, not committed:
+A folder is compressed binary — 11 MB for `recent_pp`, 45 MB for all four — so it is
+**built on each machine**, not committed:
 
 ```bash
 ecstasy datasets --verify              # says "not built yet" and names the command
