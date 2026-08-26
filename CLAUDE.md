@@ -21,6 +21,14 @@ Three rules that follow from how this repo is built:
 - **A dataset row carries identity.** `version`, `description`, `expected_entries` are
   required, and `ecstasy datasets --verify` asserts the count. A split is a file nothing
   stops from changing under a published number.
+- **ecstasy owns its evaluation data — never register a row pointing into MENTOS.**
+  Every scorable row is `kind: ecstasy` under `${DATA_ROOT}/datasets/<name>`. The only
+  place a foreign path may appear is a row's `built_from` recipe, which `load_dataset`
+  drops so no scoring path can follow it, and which `ecstasy import_dataset` reads once.
+  This is not tidiness: MENTOS PR #266 retired the five splits every row used to name,
+  and `seq_id_30`'s parquet is already gone. A dataset folder is BUILT per machine
+  (`ecstasy import_dataset --dataset recent_pp`), not committed — `--verify` says "not
+  built yet" and names the command, which is the normal state on a new cluster.
 - **Every model gets its own venv.** `models.yaml` names it; `adapter.py` spawns the
   runner with that venv's python; runners import no ecstasy code. This is deliberate —
   it is what stops one model's dependency tree breaking another's.

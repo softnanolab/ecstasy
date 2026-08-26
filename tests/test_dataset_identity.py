@@ -126,9 +126,59 @@ class TestRegisteredRows:
             assert row.get("expected_entries"), f"{name} has no expected_entries"
             assert row.get("version"), f"{name} has no version"
 
-    def test_pinder_counts_are_the_measured_ones_not_the_old_comments(self):
-        """Regression pin: the YAML comments said 98 and 474; the parquets hold 106/454."""
+    def test_registered_counts_are_the_measured_ones(self):
+        """Regression pin. Counts here were measured from the parquets, never copied
+        from a comment — the comments had already drifted (98/474 vs 106/454)."""
         from ecstasy.datasets.base import _registry
         reg = _registry()
-        assert reg["val_pinder_chain"]["expected_entries"] == 106
-        assert reg["val_pinder_pair"]["expected_entries"] == 454
+        assert reg["recent_pp"]["expected_entries"] == 151
+        assert reg["foldbench_pp"]["expected_entries"] == 193
+        assert reg["foldbench_abag"]["expected_entries"] == 137
+        # The union is exactly its two parts; if this drifts, one of them changed.
+        assert (reg["foldbench"]["expected_entries"]
+                == reg["foldbench_pp"]["expected_entries"]
+                + reg["foldbench_abag"]["expected_entries"])
+
+
+class TestNoScoringPathReachesMentos:
+    """ecstasy owns its evaluation data.
+
+    A dataset ecstasy scores against must not be able to change because another project
+    rebuilt or deleted a split. That is not a style preference: MENTOS retired the five
+    splits every row here used to name, and `seq_id_30`'s parquet is simply gone. These
+    tests pin the property rather than the intention.
+    """
+
+    def test_no_scorable_row_resolves_into_a_foreign_tree(self):
+        from ecstasy.datasets.base import _registry, dataset_names
+        for name in dataset_names():
+            row = _registry()[name]
+            paths = [str(v) for k, v in row.items()
+                     if k != "built_from" and isinstance(v, str)]
+            for p in paths:
+                assert "${MENTOS_ROOT}" not in p, (
+                    f"{name}.{p} resolves into MENTOS. Import it into a dataset folder "
+                    f"and reference it as ${{DATA_ROOT}}/datasets/<name> instead.")
+
+    def test_built_from_is_dropped_before_a_loader_sees_it(self):
+        """The recipe is provenance. A loader that could read it could follow it."""
+        from ecstasy.datasets.base import dataset_names, dataset_source, load_dataset
+        for name in dataset_names():
+            if dataset_source(name) is None:
+                continue
+            d = load_dataset(name)
+            assert not hasattr(d, "built_from")
+            assert "built_from" not in d.manifest()
+            assert all("${MENTOS_ROOT}" not in str(p)
+                       for p in d.source_paths().values())
+
+    def test_every_dataset_can_be_rebuilt(self):
+        """A folder is built, not committed — so every row must say how to build it."""
+        from ecstasy.datasets.base import dataset_names, dataset_source
+        for name in dataset_names():
+            spec = dataset_source(name)
+            assert spec, f"{name} has no built_from: it could never be rebuilt"
+            assert spec.get("index"), f"{name}.built_from names no index"
+            assert spec.get("index_sha256"), (
+                f"{name}.built_from has no index_sha256, so a source rebuilt at the "
+                f"same path would be imported over this dataset without a word")

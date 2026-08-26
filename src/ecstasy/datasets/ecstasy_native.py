@@ -61,6 +61,34 @@ class EcstasyDataset(Dataset):
     def source_paths(self) -> dict[str, Path]:
         return {"index": self.index, "gt_root": self.gt_root, "manifest": self.manifest_path}
 
+    @property
+    def materialised(self) -> bool:
+        return self.manifest_path.exists() and self.index.exists()
+
+    def verify(self) -> dict:
+        """As the base, but an unbuilt folder gets one actionable line, not three.
+
+        A registered dataset that has never been imported is the normal state on a new
+        machine — a dataset folder is not committed, it is built. Reporting it as three
+        "missing source" problems reads like corruption; it is a missing build step.
+
+        A truncated import is reported too: `expected_entries` equals the truncated
+        count, so without this the folder verifies as perfectly healthy while being a
+        different dataset wearing the right name.
+        """
+        if not self.materialised:
+            return {"name": self.name, "ok": False, "n_entries": None,
+                    "expected_entries": self.expected_entries, "coverage": None,
+                    "problems": [f"not built yet: {self.root} has no dataset.yaml. "
+                                 f"Build it with `ecstasy import_dataset {self.name}`."]}
+        report = super().verify()
+        if self.folder_manifest.get("partial_import"):
+            report["problems"].append(
+                f"folder was imported with a --limit, so it holds a truncated slice of "
+                f"{self.name} rather than the dataset. Re-import without --limit.")
+            report["ok"] = False
+        return report
+
     def gt_path(self, entry_id: str) -> Path:
         return store.entry_path(self.gt_root, entry_id)
 

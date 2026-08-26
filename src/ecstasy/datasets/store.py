@@ -33,12 +33,29 @@ FORMAT_VERSION = 1
 _ARRAYS = ("atom37_positions", "atom37_mask", "aatype", "asym_id", "residue_index")
 
 
+def _check_range(field: str, values, lo: int, hi: int) -> None:
+    a = np.asarray(values)
+    if a.size and (int(a.min()) < lo or int(a.max()) > hi):
+        raise ValueError(
+            f"{field} holds values outside [{lo}, {hi}] "
+            f"(min {int(a.min())}, max {int(a.max())}), so the storage dtype would wrap "
+            f"them silently. Widen the dtype in ecstasy.datasets.store rather than "
+            f"letting this entry through.")
+
+
 def write_entry(path: Path, *, sequences, atom37_positions, atom37_mask, aatype,
                 asym_id, residue_index, chain_ids=None, is_homodimer=None,
                 source: str | None = None) -> Path:
     """Write one entry's ground truth."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # The narrow dtypes below are chosen for size, and numpy casts by WRAPPING rather
+    # than raising: a 200-chain assembly would silently store asym_id 200 as -56 and
+    # every chain-aware metric would read a different complex than the one written.
+    # Cheap to check once at write time, impossible to notice later.
+    _check_range("asym_id", asym_id, -128, 127)
+    _check_range("aatype", aatype, -128, 127)
+    _check_range("residue_index", residue_index, -(2 ** 31), 2 ** 31 - 1)
     meta = {
         "format_version": FORMAT_VERSION,
         "sequences": list(sequences),
