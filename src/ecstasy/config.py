@@ -76,6 +76,16 @@ class Settings:
     def msa_store(self) -> Path:
         return self.DATA_ROOT / "msa_store"
 
+    @property
+    def natives_root(self) -> Path:
+        """Ground-truth PDBs rendered from a dataset's own GT, cached per dataset.
+
+        Derived, not transferred: written by ``ecstasy.structure.pdb`` from the
+        registered ground truth, so a structure run needs no side-loaded native
+        directory and cannot silently score against someone else's natives.
+        """
+        return self.DATA_ROOT / "natives"
+
 
 @lru_cache(maxsize=1)
 def settings() -> Settings:

@@ -130,6 +130,90 @@ class Dataset(ABC):
                         else {"path": str(p), "exists": p.exists(), "kind": "directory"})
         return out
 
+    #: Whether this LOADER can supply native structures at all. Per-entry absence is a
+    #: separate question, answered by `native_bundle` returning None — a loader may have
+    #: full-atom GT for most entries and not others.
+    has_structure_gt: ClassVar[bool] = False
+
+    def native_bundle(self, entry_id: str) -> dict | None:
+        """The native structure as an atom37 bundle, or None without full-atom GT.
+
+        The single thing a loader must supply for structure scoring; everything else is
+        in :meth:`score_structure`, so a new loader gets DockQ for free.
+        """
+        return None
+
+    def native_pdb(self, entry_id: str, cache_dir: Path | None = None) -> Path | None:
+        """Render (and cache) the native. None when there is no full-atom GT.
+
+        Written by the same writer that renders predictions, which is the property that
+        makes DockQ compare structures rather than serialisations — and which was verified
+        byte-identical to the natives the MENTOS DockQ series was scored against.
+        """
+        from ecstasy.config import settings
+        from ecstasy.structure.pdb import write_atom37_pdb
+
+        cache_dir = Path(cache_dir) if cache_dir is not None else (
+            settings().natives_root / self.name)
+        out = cache_dir / f"{entry_id}_native.pdb"
+        if out.exists():
+            return out
+        bundle = self.native_bundle(entry_id)
+        if bundle is None:
+            return None
+        return write_atom37_pdb(
+            out, positions=bundle["atom37_positions"], atom_mask=bundle["atom37_mask"],
+            aatype=bundle["aatype"], asym_id=bundle["asym_id"],
+            residue_index=bundle["residue_index"])
+
+    def score_structure(self, entry: Entry, structure_path: Path,
+                        work_dir: Path | None = None,
+                        metrics: tuple[str, ...] | None = None,
+                        null_draws: int = 0,
+                        natives_dir: Path | None = None) -> dict[str, float]:
+        """DockQ and per-chain fold quality for one predicted structure.
+
+        Concrete for the same reason :meth:`score` is: it is a pure function of
+        ``native_bundle`` plus the runner's ``structure.npz``, so no loader needs its own.
+
+        ``null_draws > 0`` adds the random-placement floor — the model's own chains with
+        one re-docked at random. That floor is what a low DockQ must be read against, and
+        it is opt-in because it costs ``null_draws`` extra DockQ invocations per target
+        where every other metric here is one shared invocation.
+        """
+        from ecstasy.metrics import DEFAULT_STRUCTURE_METRICS, StructureEval
+        from ecstasy.metrics import registry as metric_registry
+        from ecstasy.metrics.structure import random_placement_null
+        from ecstasy.structure.pdb import load_structure_npz, render_structure_npz
+
+        work_dir = Path(work_dir) if work_dir is not None else Path(structure_path).parent
+        native_pdb = self.native_pdb(entry.id, cache_dir=natives_dir)
+        if native_pdb is None:
+            return {"_skipped": "no full-atom ground truth for this entry"}
+        try:
+            pred = load_structure_npz(structure_path)
+        except (KeyError, OSError, ValueError) as e:
+            return {"_error": f"unreadable structure.npz: {e}"}
+        native = self.native_bundle(entry.id)
+        if pred["asym_id"].shape != native["asym_id"].shape:
+            # Scoring a length-mismatched pair would silently compare wrong residues.
+            return {"_error": f"length mismatch: pred={pred['asym_id'].shape[0]} "
+                              f"native={native['asym_id'].shape[0]}"}
+
+        pred_pdb = render_structure_npz(structure_path, work_dir / f"{entry.id}_pred.pdb")
+        ev = StructureEval(pred=pred, native=native, pred_pdb=pred_pdb,
+                           native_pdb=native_pdb, entry_id=entry.id)
+        if not ev.dockq():
+            return {"_error": "DockQ produced no scores — is the `DockQ` CLI installed "
+                              "(pip install DockQ)?"}
+        out = metric_registry.compute(metrics or DEFAULT_STRUCTURE_METRICS, ev)
+        if null_draws:
+            null = random_placement_null(pred_pdb, native_pdb, entry.id,
+                                         n_draws=null_draws, work_dir=work_dir)
+            out["null_DockQ_mean"] = null["mean"]
+            out["null_DockQ_max"] = null["max"]
+        return out
+
     def composition(self) -> dict:
         """What this split is made of — computed ONCE and stored, never per campaign.
 
