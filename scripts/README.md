@@ -2,12 +2,12 @@
 
 Each benchmarking campaign gets its own subdirectory. The current one is
 **`mentos-perf-benchmarking/`** (inter-chain P@K vs. inference-FLOPs across structure models,
-the chain-order swap experiment, the checkpoint sweep, distogram-evolution, the figures, and
-the Notion-registry sync). `install/` holds environment setup. The **eval/sweep work is plain
-`ecstasy …` CLI calls**; the scripts only plot, sweep, and sync.
+the chain-order swap experiment, the checkpoint sweep, distogram-evolution, and the figures).
+`install/` holds environment setup. The **eval/sweep work is plain `ecstasy …` CLI calls**;
+the scripts only plot and sweep.
 
-Concrete pointers (checkpoint & dataset paths) are **not committed** — they live in the Notion
-benchmarking Registry and are resolved by name (see "Checkpoints & datasets" below and the
+Concrete pointers (checkpoint paths) are resolved by name from the committed
+`src/ecstasy/registry/checkpoints.yaml` (see "Checkpoints & datasets" below and the
 top-level README → Configuration).
 
 > SLURM `*.sbatch` wrappers are **not committed** — they hardcode per-cluster/per-job
@@ -31,14 +31,14 @@ Paths come from `settings()` (e.g. `settings().runs_root`), never hardcoded. CMU
 Concrete figures look for the font in `$CMU_FONT_DIR` (default `~/.fonts`); they fall
 back to the default font if it's not installed.
 
-## Checkpoints & datasets (Notion registry)
+## Checkpoints & datasets
 
 MENTOS checkpoints and validation datasets are referenced by **name**, never path; the
-name → concrete-path mapping lives in the Notion benchmarking Registry. Pull it into a
-gitignored local cache once (re-run whenever the Registry changes), then select by name:
+name → concrete-path mapping lives in the committed `src/ecstasy/registry/checkpoints.yaml`
+(checkpoints) and `src/ecstasy/registry/datasets.yaml` (datasets). Select by name:
 
 ```bash
-$PYB scripts/mentos-perf-benchmarking/notion_pull.py        # writes registry.local.yaml (gitignored)
+# checkpoint names resolve from the committed src/ecstasy/registry/checkpoints.yaml
 $PYB -m ecstasy.cli run --dataset val_seq_pair --model mentos --checkpoint a5sgd6ul_s90k --profile
 ```
 
@@ -73,7 +73,7 @@ for split in val_seq_chain val_seq_pair val_pinder_chain val_pinder_pair; do
     $PYB -m ecstasy.cli run --dataset $split --model esmfold      --preset $preset --profile
   done
 done
-$PYB -m ecstasy.cli run --dataset $split --model mentos         --checkpoint a5sgd6ul_s90k --profile  # name from the Notion registry
+$PYB -m ecstasy.cli run --dataset $split --model mentos         --checkpoint a5sgd6ul_s90k --profile  # name from registry/checkpoints.yaml
 $PYB -m ecstasy.cli run --dataset $split --model msa_pairformer --preset full               --profile
 ```
 

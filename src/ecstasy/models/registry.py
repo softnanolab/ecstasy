@@ -78,17 +78,17 @@ def load_model(name: str, preset: str | None = None, overrides: dict | None = No
         )
 
     # Checkpoint models (e.g. mentos) have no committed presets: resolve a checkpoint *name*
-    # to concrete params from the Notion-backed registry cache. The variant is the name.
+    # to concrete params from the committed registry/checkpoints.yaml. The variant is the name.
     if checkpoint:
-        from ecstasy.registry import local
-        params = local.checkpoint_params(checkpoint)
+        from ecstasy.registry import checkpoints
+        params = checkpoints.checkpoint_params(checkpoint)
         if overrides:
             params.update(overrides)
         return _make(checkpoint, _variant(checkpoint, overrides), params)
     if not presets:
         if preset:
             raise KeyError(f"model {name!r} has no presets; select a checkpoint with "
-                           f"--checkpoint <name> (from the Notion registry)")
+                           f"--checkpoint <name> (from registry/checkpoints.yaml)")
         return _make("", "", {})            # metadata-only (msa/env/needs_msa), not runnable
 
     preset = preset or row["default_preset"]

@@ -30,31 +30,24 @@ bash scripts/install/colabfold.sh
 
 ## Configuration & the benchmarking registry
 
-Ecstasy commits **no machine-specific paths**. Everything concrete lives in one of two places:
+Ecstasy commits **no machine-specific paths** directly — everything concrete lives behind
+`${VAR}` placeholders in one of the committed registry files:
 
-1. **Filesystem roots** — a gitignored repo-root `.env` (copy `.env.example`). `ecstasy.config`
-   resolves them `env > .env`, and the registries (`registry/datasets.yaml`,
-   `registry/models.yaml`) reference them with `${VAR}` placeholders.
+- **Filesystem roots** — a gitignored repo-root `.env` (copy `.env.example`). `ecstasy.config`
+  resolves them `env > .env`, and the registries (`registry/datasets.yaml`,
+  `registry/models.yaml`, `registry/checkpoints.yaml`) reference them with `${VAR}` placeholders.
 
-2. **The Notion benchmarking registry** — the source of truth for everything concrete. It is the
-   **Ecstasy** page (set `ECSTASY_NOTION_PAGE` in `.env`), laid out as a project hub:
+- **Checkpoints** (`registry/checkpoints.yaml`) — MENTOS checkpoint *names* resolve to concrete
+  `abs_path` / `run_id` / `num_recycles` / `model_config_path` rows, committed like any other
+  registry file. Add a row by hand (or via the `/experiment` command) for each checkpoint you
+  want to run; see the file's header comment for the schema.
 
-   - **Registry** — two small reference tables that scripts resolve by name:
+- **Datasets** (`registry/datasets.yaml`) — every evaluation split, its identity fields, and
+  its `built_from` rebuild recipe.
 
-     | Table | Holds |
-     |-------|-------|
-     | **Checkpoints** | `key` (run name) → absolute path, model, run_id, step, num_recycles, status |
-     | **Datasets** | name → index path, gt_root, n, split, contact_bin |
-
-   - **Benchmarking Log** — a database of dated, narrative campaign entries (the project's
-     evolution, MENTOS-Sprints style): goal → TL;DR → what we ran → results with figures embedded
-     inline → decision → artifacts. Raw results and charts live here, in context.
-
-   Benchmark scripts (under `scripts/mentos-perf-benchmarking/`) take checkpoint and dataset
-   **names**, never paths — they resolve names → paths from the Registry tables. Nothing in git
-   pins where a checkpoint or split physically lives; that lives in Notion (a local copy is kept
-   under `$DATA_ROOT`, as today). Each new benchmarking campaign gets its own `scripts/<project>/`
-   and its own Benchmarking Log entries.
+Benchmark scripts (under `scripts/mentos-perf-benchmarking/`) take checkpoint and dataset
+**names**, never paths — they resolve names → paths from these committed registry files. Each
+new benchmarking campaign gets its own `scripts/<project>/`.
 
 ## [DEV] Management of Repository
 ### Maintaning dependencies

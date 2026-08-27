@@ -86,11 +86,13 @@ mentos:
   env: ${ENVS_ROOT}/.venv-mentos         # dedicated venv; mentos installed editable from /home/.../mentos
   msa: none
   # No checkpoint presets here. MENTOS checkpoints are concrete (paths, steps, recycles) and
-  # live ONLY in the Notion benchmarking Registry (the source of truth). Select one by name:
+  # live in the committed src/ecstasy/registry/checkpoints.yaml (the source of truth — add a
+  # row there for each checkpoint you want to run). Select one by name:
   #     ecstasy run --dataset D --model mentos --checkpoint a5sgd6ul_s90k
-  # load_model resolves the name -> {weights path, num_recycles, run_id} via registry.local.yaml
-  # (run scripts/mentos-perf-benchmarking/notion_pull.py first). Nothing concrete is committed;
-  # the run-dir variant is the checkpoint name (e.g. a5sgd6ul_s90k / a5sgd6ul_s90k_r0).
+  # load_model resolves the name -> {weights path, num_recycles, run_id} via
+  # registry/checkpoints.yaml (see src/ecstasy/registry/local.py). Paths there use the same
+  # ${VAR} interpolation as this file; the run-dir variant is the checkpoint name
+  # (e.g. a5sgd6ul_s90k / a5sgd6ul_s90k_r0).
 
 msa_pairformer:
   runner: msa_pairformer_runner.py

@@ -35,8 +35,8 @@ def main() -> None:
     from scripts.pretrain.pretrain_mentos import MENTOS
     from scripts.evals.evaluate_from_wandb import load_model
 
-    from ecstasy.registry import local
-    ck = local.checkpoint(args.checkpoint)                   # registry name -> concrete dir/run_id
+    from ecstasy.registry import checkpoints
+    ck = checkpoints.checkpoint(args.checkpoint)                   # registry name -> concrete dir/run_id
     run_id, ckpt_dir = ck["run_id"], str(Path(ck["abs_path"]).parent)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

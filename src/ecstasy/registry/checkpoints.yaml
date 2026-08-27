@@ -1,0 +1,32 @@
+# MENTOS checkpoints -- committed registry, replacing the old Notion-backed
+# registry.local.yaml cache (loaded via registry/checkpoints.py). This file IS the
+# source of truth now: a checkpoint used in
+# any ecstasy run must have a row here, added by hand (or via `/experiment`, which walks
+# through the required fields with you before appending one).
+#
+# Why committed, not gitignored: `models.yaml` and `datasets.yaml` are already the
+# source of truth for everything else ecstasy runs against, and both are committed with
+# machine paths behind ${VAR} placeholders. Checkpoints get the same treatment so a
+# checkpoint name resolves the same way on every machine that has the weights, and so a
+# result's provenance (which checkpoint, which run_id, which recycle count) is visible
+# in git history rather than living only in a gitignored file on one cluster.
+#
+# ${VAR} placeholders (ECSTASY_ROOT, DATA_ROOT, MENTOS_ROOT, ENVS_ROOT, TOOLS_ROOT)
+# expand via ecstasy.config.resolve, same as models.yaml/datasets.yaml. Point abs_path
+# at wherever MENTOS checkpoints actually live on your machine -- do not commit a bare
+# absolute path that only exists on one cluster.
+#
+# Schema per entry (run_id/num_recycles/model_config_path are optional; abs_path is
+# required for anything runnable -- a checkpoint row with no abs_path, e.g. a
+# random-init baseline, is registered but not runnable via `ecstasy run`):
+#
+#   <checkpoint_name>:
+#     abs_path: ${SOME_ROOT}/path/to/weights.pt
+#     run_id: <wandb or training run id, optional>
+#     num_recycles: <int, optional>
+#     model_config_path: ${SOME_ROOT}/path/to/config.yaml   # optional
+#
+# Naming convention carried over from the old registry: <run_id>_<step>, e.g.
+# a5sgd6ul_s90k for run a5sgd6ul at step 90k.
+
+checkpoints: {}
