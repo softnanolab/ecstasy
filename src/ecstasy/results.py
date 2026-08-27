@@ -87,26 +87,18 @@ def _digest(fp_path: Path) -> str:
 
 
 def _flops(run_dir: Path) -> dict | None:
-    """Mean measured FLOPs across per-entry sidecars, when the run was profiled.
+    """Measured FLOPs for a profiled run, from the ONE canonical aggregator.
 
-    Reported as a distribution rather than a scalar: FLOPs scale with length, so a
-    single number on a 104-1006 residue split describes no protein in it.
+    This delegates to :func:`ecstasy.pipeline.flops_summary` rather than reading the
+    sidecars again. An earlier version of this module re-implemented that aggregation
+    and took ``sorted(vals)[len(vals) // 2]`` as the median, which is the upper-middle
+    element rather than the mean of the two middle values: on an even number of targets
+    it disagreed with `ecstasy compare` on the same run (30.0 vs 25.0 for 10/20/30/40).
+    Two different numbers both called "median FLOPs" is precisely what a published
+    record cannot afford. There is one aggregator; everything reads it.
     """
-    files = sorted((run_dir / "predictions").glob("*/flops.json"))
-    if not files:
-        return None
-    vals, scope = [], None
-    for f in files:
-        d = json.loads(f.read_text())
-        v = d.get("flops") or d.get("total_flops")
-        if v:
-            vals.append(float(v))
-        scope = scope or d.get("scope")
-    if not vals:
-        return None
-    vals.sort()
-    return {"n": len(vals), "scope": scope, "mean": sum(vals) / len(vals),
-            "median": vals[len(vals) // 2], "min": vals[0], "max": vals[-1]}
+    from ecstasy.pipeline import flops_summary
+    return flops_summary(run_dir)
 
 
 def build_record(result_path: Path) -> dict:
@@ -176,11 +168,20 @@ def build_record(result_path: Path) -> dict:
 
 
 def _relative_run_dir(run_dir: Path) -> str:
+    """``<dataset>/<model>/<variant>``, never an absolute path.
+
+    The fallback keeps three components rather than one. A run directory is always
+    ``<runs_root>/<dataset>/<model>/<variant>``, so ``.name`` alone would record
+    ``full`` — which names no run and is indistinguishable between models. That is
+    also what hid a bug once: a test pointed DATA_ROOT elsewhere, this fell back
+    silently, and the row recorded ``full`` instead of failing loudly.
+    """
     from ecstasy.config import settings
+    run_dir = Path(run_dir)
     try:
-        return str(Path(run_dir).relative_to(settings().runs_root))
+        return str(run_dir.relative_to(settings().runs_root))
     except (ValueError, TypeError):
-        return Path(run_dir).name
+        return str(Path(*run_dir.parts[-3:]))
 
 
 def check_publishable(rec: dict, allow_partial: bool = False,

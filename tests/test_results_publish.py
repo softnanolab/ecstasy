@@ -135,10 +135,129 @@ class TestStore:
         with pytest.raises(ValueError, match=":2"):
             results.load(store)
 
-    def test_run_dir_is_recorded_relative_not_absolute(self):
+
+def _run_dir(tmp_path, *, flops=None, dirty_model=True) -> Path:
+    """A run directory on disk, as `ecstasy score` leaves one.
+
+    build_record's whole job is reading these files, so it has to be tested against
+    real ones. Every other test in this module monkeypatches build_record out.
+    """
+    run = tmp_path / "runs" / "recent_pp" / "minifold" / "full"
+    (run / "predictions" / "10bl").mkdir(parents=True)
+    (run / "result.json").write_text(json.dumps({
+        "dataset": "recent_pp", "model": "minifold", "variant": "full",
+        "metrics": ["P@K"],
+        "coverage": {"n_evaluated": 151, "n_intended": 151, "fraction": 1.0,
+                     "complete": True, "limit": None},
+        "summary": {"n_evaluated": 151, "n_skipped": 0, "n_errors": 0,
+                    "mean": {"P@K": 0.2611}, "median": {"P@K": 0.14},
+                    "structure": {"n": 151, "mean": {"DockQ": 0.2426, "iRMSD": 12.31}}},
+        "per_protein": {},
+        "provenance": {
+            "ecstasy": {"sha": "5eb9164", "dirty": False},
+            "captured_utc": "2026-08-26T17:00:00+00:00",
+            "env": {"host": "cx3-20-3"},
+            "venv": {"packages": {"minifold": {"git": {
+                "sha": "63db8b9", "dirty": dirty_model,
+                "dirty_files": ["minifold/model/model.py"] if dirty_model else []}}}},
+            "params_provenance": {"checkpoint": {
+                "kind": "file", "path": "/w/minifold_48L.ckpt",
+                "resolved": "/real/minifold_48L.ckpt", "size": 2784107297,
+                "sha256_ends": "99d9db"}},
+        },
+    }))
+    (run / "prediction_fingerprint.json").write_text(json.dumps({"digest": "d8e0adcf"}))
+    (run / "scoring_fingerprint.json").write_text(json.dumps({"digest": "057f0579"}))
+    if flops is not None:
+        for i, v in enumerate(flops):
+            d = run / "predictions" / f"t{i}"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "flops.json").write_text(json.dumps({"flops": v, "macs": v // 2}))
+    return run
+
+
+class TestBuildRecord:
+    """The projection layer: the only part of publish that reads real files."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_settings(self):
+        """`settings()` is lru_cached, so setenv alone does not repoint DATA_ROOT.
+
+        Without clearing, these tests pass when the file is run alone (nothing has
+        called settings() yet, so the first call sees the patched env) and fail in the
+        full suite once an earlier test has cached the real DATA_ROOT. Clearing on both
+        sides is the pattern test_boltz_csv already uses; the trailing clear matters as
+        much as the leading one, or the NEXT test inherits a tmp_path DATA_ROOT.
+        """
+        from ecstasy import config
+        config.settings.cache_clear()
+        yield
+        config.settings.cache_clear()
+
+    def _build(self, tmp_path, monkeypatch, **kw):
+        # DATA_ROOT is the canonical seam the rest of the suite uses; Settings is a
+        # frozen dataclass and runs_root a derived property, so it is also the only one.
+        from ecstasy import config
+        run = _run_dir(tmp_path, **kw)
+        monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+        config.settings.cache_clear()
+        return run, results.build_record(run / "result.json")
+
+    def test_run_dir_is_relative_to_data_root_not_absolute(self, tmp_path, monkeypatch):
         """The store is committed and read on other machines, where an absolute
-        /rds/general/user/<someone>/... path means nothing."""
-        assert not Path(_record()["run_dir"]).is_absolute()
+        /rds/general/user/<someone>/... path means nothing.
+
+        This asserts on build_record's OUTPUT. An earlier version of this test asserted
+        that the hand-written fixture was relative, which would have passed unchanged
+        while build_record regressed to absolute paths — the exact bug it was named for.
+        """
+        _, rec = self._build(tmp_path, monkeypatch)
+        assert not Path(rec["run_dir"]).is_absolute()
+        assert rec["run_dir"] == str(Path("recent_pp") / "minifold" / "full")
+
+    def test_fingerprints_are_read_from_their_sidecars(self, tmp_path, monkeypatch):
+        _, rec = self._build(tmp_path, monkeypatch)
+        assert rec["fingerprints"] == {"prediction": "d8e0adcf", "scoring": "057f0579"}
+
+    def test_a_dirty_model_tree_is_captured_with_its_files(self, tmp_path, monkeypatch):
+        """Whether the residx patch was applied is the difference between two different
+        experiments. It has to survive into the row."""
+        _, rec = self._build(tmp_path, monkeypatch)
+        mc = rec["provenance"]["model_code"]["minifold"]
+        assert mc["dirty"] is True
+        assert mc["dirty_files"] == ["minifold/model/model.py"]
+
+    def test_a_clean_model_tree_reports_not_dirty(self, tmp_path, monkeypatch):
+        _, rec = self._build(tmp_path, monkeypatch, dirty_model=False)
+        assert rec["provenance"]["model_code"]["minifold"]["dirty"] is False
+
+    def test_weights_carry_the_resolved_path_and_content_hash(self, tmp_path, monkeypatch):
+        """MiniFold's checkpoint is a symlink into a MENTOS log dir (#35); the row has
+        to record what it actually resolved to and the bytes it hashed."""
+        _, rec = self._build(tmp_path, monkeypatch)
+        w = rec["provenance"]["weights"]["checkpoint"]
+        assert w["resolved"] == "/real/minifold_48L.ckpt"
+        assert w["sha256_ends"] == "99d9db"
+
+    def test_an_unprofiled_run_has_no_flops(self, tmp_path, monkeypatch):
+        _, rec = self._build(tmp_path, monkeypatch)
+        assert rec["flops"] is None
+
+    def test_flops_come_from_the_canonical_aggregator(self, tmp_path, monkeypatch):
+        """results must not re-implement flops aggregation.
+
+        It did once, taking sorted(vals)[n // 2] as the median — the upper-middle
+        element, not the mean of the two middle values. On an even number of targets
+        that disagreed with `ecstasy compare` on the same run: 30.0 against 25.0 for
+        10/20/30/40. Two numbers both called "median FLOPs" is the one thing a
+        published record cannot have.
+        """
+        from ecstasy.pipeline import flops_summary
+        run, rec = self._build(tmp_path, monkeypatch, flops=[10, 20, 30, 40])
+        assert rec["flops"] == flops_summary(run)
+        assert rec["flops"]["median_flops"] == 25.0
+        assert rec["flops"]["mean_flops"] == 25.0
+        assert rec["flops"]["n_flops"] == 4
 
 
 class TestReport:

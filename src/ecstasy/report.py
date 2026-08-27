@@ -62,7 +62,7 @@ def _contact_table(rows) -> list[str]:
         mean = (r["metrics"].get("mean") or {})
         cells = [_fmt(mean.get(m)) for m in _CONTACT]
         fl = r.get("flops") or {}
-        tflops = _fmt(fl["mean"] / 1e12, 1) if fl.get("mean") else "—"
+        tflops = _fmt(fl["mean_flops"] / 1e12, 1) if fl.get("mean_flops") else "—"
         sha = (r["provenance"].get("ecstasy_sha") or "")[:7]
         out.append(f"| {r['model']['name']}{_flag(r)} | {r['model']['variant']} | "
                    f"{r['n']['evaluated']} | " + " | ".join(cells)
