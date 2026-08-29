@@ -104,6 +104,11 @@ $DATA_ROOT/
     params.json provenance.json result.json predictions/<id>/
 ```
 
+(Note: this `experiments/` is a subtree of `$DATA_ROOT` -- the run-output layout, not yet
+built. It is a distinct thing from the *repo-level* `experiments/` directory, which holds
+committed experiment manifests and campaign scripts -- see `experiments/README.md`. The
+name overlap is coincidental; don't conflate the two.)
+
 Models request assets **by name** (`needs_assets: [esmfold_monomers]`), never by hardcoded
 path. This fixes `plmgraph_inter` and `deepinteract`, which today read
 `${DATA_ROOT}/structures/esmfold` — a loose global directory, produced by a different model,
