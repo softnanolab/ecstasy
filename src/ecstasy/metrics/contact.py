@@ -77,7 +77,7 @@ def pak_inter_chain(
 
 # --- tolerant inter-chain P@K ---------------------------------------------------------
 #
-# Hoisted out of `scripts/mentos-perf-benchmarking/plot_pak_vs_flops.py`, where it lived
+# Hoisted out of `experiments/mentos-perf-benchmarking/plot_pak_vs_flops.py`, where it lived
 # as `_tol_inter_pak` and could only be reached by that one plotter. The behaviour is
 # preserved: GT dilated by a Chebyshev radius in (chainA-res, chainB-res) space, scoring
 # the top max(1, round(K/divisor)) predicted inter pairs, with invalid pairs excluded from
