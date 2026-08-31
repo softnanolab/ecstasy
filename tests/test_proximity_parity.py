@@ -9,8 +9,10 @@ output and identical accession encoding, so the shared **filter/encode/stitch lo
 cannot drift. It deliberately supplies coverage/identity directly and therefore does
 NOT cover the one place the two paths genuinely differ — how each *derives* coverage/
 identity (API: server span metadata; local: computed from the alignment). That
-derivation gap can flip near-threshold keep/drop decisions for rows with internal gaps;
-see ``msa/README.md`` ("Known parity gap") and the DB-gated integration cross-check.
+derivation was the real parity gap, and it is closed in the local direction by this
+change (see ``msa/README.md``) -- but nothing here exercises the derivation itself, and
+the integration cross-check that README points to does not exist yet. A regression in
+``_coverage_vs_query`` / ``_identity_vs_query`` would therefore not be caught.
 
 If ``third_party/colabfold-local`` is not checked out, the test skips.
 """
