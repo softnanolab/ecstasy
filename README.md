@@ -45,9 +45,9 @@ Ecstasy commits **no machine-specific paths** directly — everything concrete l
 - **Datasets** (`registry/datasets.yaml`) — every evaluation split, its identity fields, and
   its `built_from` rebuild recipe.
 
-Benchmark scripts (under `scripts/mentos-perf-benchmarking/`) take checkpoint and dataset
+Benchmark scripts (under `experiments/mentos-perf-benchmarking/`) take checkpoint and dataset
 **names**, never paths — they resolve names → paths from these committed registry files. Each
-new benchmarking campaign gets its own `scripts/<project>/`.
+new benchmarking campaign gets its own `experiments/<project>/` (see experiments/README.md).
 
 ## [DEV] Management of Repository
 ### Maintaning dependencies

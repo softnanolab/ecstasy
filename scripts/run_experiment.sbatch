@@ -8,7 +8,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --partition=workq
 # Generic experiment runner. Usage:
-#   sbatch scripts/run_experiment.sbatch experiments/boltz2_val_splits.yaml [extra ecstasy args]
+#   sbatch scripts/run_experiment.sbatch experiments/boltz2_headline/manifest.yaml [extra ecstasy args]
 # Runs in .venv-boltz (has ecstasy + torch + mentos, so predict subprocesses to
 # each model's env and scoring can load the MENTOS GT here).
 set -euo pipefail

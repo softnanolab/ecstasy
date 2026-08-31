@@ -78,7 +78,7 @@ ecstasy run     --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--l
 ecstasy score   --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N]
 ecstasy compare --dataset D                    # comparison.{csv,md} across all runs
 ecstasy msa     --datasets D[,D] --kind per_chain|complex [--phase prepare|submit|ingest]
-ecstasy experiment experiments/<name>.yaml [--limit N] [--no_score]
+ecstasy experiment experiments/<name>/manifest.yaml [--limit N] [--no_score]
 ```
 
 `--limit 1` is the smoke (no separate `_smoke` configs). `--set` takes a dict.
@@ -116,7 +116,7 @@ ecstasy msa --datasets recent_pp,foldbench_pp --kind per_chain --phase ingest
 
 # 2. Smoke one entry end-to-end, then the full sweep
 ecstasy run --dataset recent_pp --model boltz2 --limit 1
-sbatch scripts/run_experiment.sbatch experiments/boltz2_headline.yaml
+sbatch scripts/run_experiment.sbatch experiments/boltz2_headline/manifest.yaml
 
 # 3. Table
 ecstasy compare --dataset recent_pp

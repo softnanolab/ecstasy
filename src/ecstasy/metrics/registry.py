@@ -3,7 +3,7 @@
 Metrics used to be reachable only from the one place they happened to be written. The
 sharpest example: tolerant inter-chain P@K — GT dilated by a Chebyshev radius so a
 near-miss counts — existed only inside
-``scripts/mentos-perf-benchmarking/plot_pak_vs_flops.py``. It worked, it was used to make
+``experiments/mentos-perf-benchmarking/plot_pak_vs_flops.py``. It worked, it was used to make
 published figures, and ``ecstasy score`` could not call it. Anything else that wanted
 tolerance had to copy it.
 

@@ -14,8 +14,8 @@
 #   ecstasy msa --datasets recent_pp,foldbench_pp,foldbench_abag --kind per_chain --phase submit
 #   ecstasy msa --datasets recent_pp,foldbench_pp,foldbench_abag --kind per_chain --phase ingest
 #
-# Run:  ecstasy experiment experiments/boltz2_headline.yaml
-# Dry:  ecstasy experiment experiments/boltz2_headline.yaml --limit 0
+# Run:  ecstasy experiment experiments/boltz2_headline/manifest.yaml
+# Dry:  ecstasy experiment experiments/boltz2_headline/manifest.yaml --limit 0
 name: boltz2_headline
 datasets:
   - recent_pp        # 151, temporally held out, full-atom GT (scores DockQ too)
