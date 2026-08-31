@@ -15,8 +15,11 @@ ESMFold2 is not a drop-in variant of ESMFold. It is ESMC-6B (frozen) plus a recu
 pair-only folding trunk plus a diffusion head, and it differs from every other model in
 the matrix in two ways that touch scoring directly:
 
-- Its distogram head is **128 bins over ~1.5–54.5 Å**, not the 64-bin 2–22 Å grid the
-  rest of the matrix uses. See §4 — this is the single highest-risk detail.
+- Its distogram head bins differently **per checkpoint family**: the release checkpoint
+  `biohub/ESMFold2` is 64 bins over 2–22 Å, the same grid the rest of the matrix uses,
+  while `-Experimental` is 128 bins over ~1.5–54.5 Å. See §4 and the correction that
+  precedes it — this is the single highest-risk detail, and the first draft of this spec
+  got it the wrong way round.
 - It takes **genuine multi-chain input**, so it needs no poly-G linker and no
   `residue_index_offset` hack. Chain boundaries come back as metadata instead of being
   reconstructed by the caller.

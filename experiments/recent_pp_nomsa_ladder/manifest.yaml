@@ -2,8 +2,8 @@
 # Both models are MSA-free, so nothing has to be generated first — this manifest is
 # runnable as-is.
 #
-# Run:  ecstasy experiment experiments/recent_pp_nomsa_ladder.yaml --profile
-# Dry:  ecstasy experiment experiments/recent_pp_nomsa_ladder.yaml --limit 0
+# Run:  ecstasy experiment experiments/recent_pp_nomsa_ladder/manifest.yaml --profile
+# Dry:  ecstasy experiment experiments/recent_pp_nomsa_ladder/manifest.yaml --limit 0
 # Smoke a single entry first: ecstasy run --dataset recent_pp --model esmfold --limit 1
 #
 # --profile is the point of the sweep: FLOPs are length-dependent, so the numbers

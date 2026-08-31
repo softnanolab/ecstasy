@@ -5,17 +5,18 @@
 # ESMC-6B checkpoint, so it is worth being able to schedule and re-run it independently
 # of the ESMFold/Boltz-2 sweep that is already done.
 #
-# Run:   ecstasy experiment experiments/recent_pp_esmfold2_ladder.yaml --profile
-# Dry:   ecstasy experiment experiments/recent_pp_esmfold2_ladder.yaml --limit 0
+# Run:   ecstasy experiment experiments/recent_pp_esmfold2_ladder/manifest.yaml --profile
+# Dry:   ecstasy experiment experiments/recent_pp_esmfold2_ladder/manifest.yaml --limit 0
 # Smoke: ecstasy run --dataset recent_pp --model esmfold2 --preset r0 --limit 1
 #
 # num_loops is ESMFold2's recycle knob, so this ladder is directly comparable with
 # esmfold's num_recycles and boltz2's recycling_steps ladders — same compute axis.
 # Everything else is held at the preset defaults so the compute→P@K line isolates it.
 #
-# The contact threshold is an ANGSTROM distance, not a bin index: ESMFold2's output
-# distogram is 128 bins over ~1.5–54.5 A, unlike the 64-bin 2–22 A grid shared by
-# Boltz-2 and the ground truth. See ESMFOLD2_INTEGRATION.md.
+# The contact threshold is an ANGSTROM distance, not a bin index, because the two
+# checkpoint families bin differently: the release checkpoint (biohub/ESMFold2, used by
+# these presets) is 64 bins over 2–22 A — the same grid as Boltz-2 and the ground truth —
+# while -Experimental is 128 bins over ~1.5–54.5 A. See ESMFOLD2_INTEGRATION.md.
 name: recent_pp_esmfold2_ladder
 datasets:
   - recent_pp

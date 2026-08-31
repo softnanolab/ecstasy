@@ -67,11 +67,16 @@ esmfold:
 # Needs its own py3.12 venv (scripts/install/esmfold2.sh): ESMFold-v1's env is pinned to
 # py3.7 by openfold's cp37 CUDA extension, while esm requires >=3.12.
 #
-# NOTE the threshold is in ANGSTROM, not a bin index. ESMFold2's output head is 128 bins
-# over ~1.5-54.5 A, NOT the 64-bin 2-22 A grid that Boltz-2 and the MENTOS ground truth
-# share — that 64-bin grid is ESMFold2's *input conditioning* distogram. Setting
-# contact_cutoff_bin: 19 here would score at ~8.9 A instead of 7.94 A and silently
-# inflate P@K. The runner derives the bin index from the model's own grid.
+# NOTE the threshold is an ANGSTROM distance, not a bin index, because the two checkpoint
+# families bin differently. The RELEASE checkpoint (biohub/ESMFold2 — what these presets
+# use) has structure_head.distogram_bins = 64 on a uniform 2-22 A grid, the SAME grid as
+# Boltz-2 and the MENTOS ground truth, so 7.9375 A is bin 19 there. The -Experimental
+# checkpoints use Algorithm 12's 128-bin ~1.5-54.5 A grid, where that distance is bin 16.
+# Specifying Angstrom is what lets one preset serve both families. The grid is not
+# recoverable from the shipped code (distogram_head is a bare nn.Linear), so it was
+# established empirically; the runner derives the bin index from the model's own bin count
+# and REFUSES any count it has no calibrated grid for rather than guessing.
+# See ESMFOLD2_INTEGRATION.md §4 and the 2026-08-17 correction above it.
 esmfold2:
   runner: esmfold2_runner.py
   env: ${ENVS_ROOT}/.venv-esmfold2

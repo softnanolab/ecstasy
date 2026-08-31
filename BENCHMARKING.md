@@ -267,12 +267,15 @@ sbatch --mem=96G scripts/run_experiment.sbatch \
 `num_loops` is ESMFold2's recycle knob, so its r0/r1/r3/r5 ladder is directly comparable
 with esmfold's `num_recycles` and boltz2's `recycling_steps`.
 
-**Its contact threshold is an Ångström distance, not a bin index.** ESMFold2's output
-distogram is 128 bins over ~1.5–54.5 Å, *not* the 64-bin 2–22 Å grid that Boltz-2 and the
-MENTOS ground truth share — that 64-bin grid is ESMFold2's input *conditioning*
-distogram. `contact_cutoff_bin: 19` would score at ~8.9 Å instead of 7.94 Å. The runner
-derives the bin index from the model's own grid and refuses to run if the head is not 128
-bins. See `ESMFOLD2_INTEGRATION.md`.
+**Its contact threshold is an Ångström distance, not a bin index** — because the two
+checkpoint families bin differently. The release checkpoint `biohub/ESMFold2` is 64 bins
+on a uniform 2–22 Å grid, the same grid Boltz-2 and the MENTOS ground truth use, so
+7.9375 Å is bin 19 there; the `-Experimental` checkpoints use a 128-bin ~1.5–54.5 Å grid
+where the same distance is bin 16. Specifying Ångström is what lets one preset serve both.
+The grid is not recoverable from the shipped code, so it was established empirically
+(median GT Cβ–Cβ distance per predicted argmax bin, anchored on backbone `i, i+1` pairs);
+the runner refuses any bin count it has no calibrated grid for. See
+`ESMFOLD2_INTEGRATION.md`.
 
 Two other traps, both silent rather than loud:
 
