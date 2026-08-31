@@ -12,8 +12,21 @@ ecstasy metrics             # every reusable metric, what it means, higher/lower
 ecstasy list                # models, their presets, their venvs
 ```
 
+**And read `results/LEADERBOARD.md` — it says what has already been benchmarked.**
+It is generated from `results/runs.jsonl` and committed, so it needs no network, no
+token and no `$DATA_ROOT`. Check it before running anything: the number may already
+exist. `git log -p results/runs.jsonl` shows every number that has ever moved and what
+changed underneath it.
+
 Three rules that follow from how this repo is built:
 
+- **A result is published deliberately, and only when it is fit to be quoted.**
+  `ecstasy publish` appends one line to `results/runs.jsonl`; nothing publishes itself,
+  so a `--limit 1` smoke never becomes the record. It refuses incomplete coverage, any
+  errored target, and a dirty ecstasy tree. It does *not* refuse a dirty model tree —
+  MiniFold's `residx` patch is exactly that, and it is the intended experiment — but the
+  row is flagged `†` in the leaderboard. Rows are keyed by BOTH fingerprints, so
+  re-scoring after a metric fix appends a row rather than editing one.
 - **A metric belongs in the registry, never in a script.** Tolerant P@K spent its life
   inside a plotting script where `ecstasy score` could not reach it, so anything wanting
   tolerance had to copy it. Add metrics in `src/ecstasy/metrics/builtins.py`; a name is
