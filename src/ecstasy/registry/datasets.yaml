@@ -74,6 +74,13 @@ recent_pp:
     contact_bin: 19
     index_sha256: 4d504b7e91f5babc76dfefb98e2b4732ca25216eb4aa767224e0dd1a9d506fe0
 
+# `swap_chains: true` (chain-order permutation: (A,B)->(B,A) with the square GT reindexed
+# to match) is implemented by MentosSquareDataset. The old val_seq_pair_swapped row went
+# away with its parquet, not the capability. A swapped row must have its OWN name: it
+# needs its own run dir, and MSA store keys are order-dependent (pair_hash), so its MSAs
+# regenerate from scratch. Making this a fingerprinted run variant rather than a loader
+# flag is tracked as an open issue.
+
 # ---------------------------------------------------------------------------------
 # FoldBench (BEAM-Labs/FoldBench) — low-homology interface test set.
 # Processed by mentos/scripts/data_processing/process_foldbench.py into the same

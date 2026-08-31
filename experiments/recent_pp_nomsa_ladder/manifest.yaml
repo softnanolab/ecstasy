@@ -1,0 +1,24 @@
+# ESMFold + single-sequence Boltz-2 recycle ladders on the recent-PP val split.
+# Both models are MSA-free, so nothing has to be generated first — this manifest is
+# runnable as-is.
+#
+# Run:  ecstasy experiment experiments/recent_pp_nomsa_ladder/manifest.yaml --profile
+# Dry:  ecstasy experiment experiments/recent_pp_nomsa_ladder/manifest.yaml --limit 0
+# Smoke a single entry first: ecstasy run --dataset recent_pp --model esmfold --limit 1
+#
+# --profile is the point of the sweep: FLOPs are length-dependent, so the numbers
+# measured on the old splits do not transfer to this one (151 dimers, 104–1006 res).
+# Only the recycle knob varies within each model; every other output-affecting
+# parameter is held at the r-preset defaults so the compute→P@K line isolates it.
+name: recent_pp_nomsa_ladder
+datasets:
+  - recent_pp
+runs:
+  - {model: esmfold, preset: r0}
+  - {model: esmfold, preset: r1}
+  - {model: esmfold, preset: r3}
+  - {model: esmfold, preset: r5}
+  - {model: boltz2_nomsa, preset: r0}
+  - {model: boltz2_nomsa, preset: r1}
+  - {model: boltz2_nomsa, preset: r3}
+  - {model: boltz2_nomsa, preset: r5}

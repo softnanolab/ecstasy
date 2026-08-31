@@ -5,10 +5,11 @@
   ecstasy run     --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N] [--no_score]
   ecstasy score   --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N]
   ecstasy compare --dataset D
-  ecstasy experiment <manifest.yaml> [--limit N] [--no_score]
+  ecstasy experiment <manifest.yaml> [--limit N] [--no_score] [--profile] [--shard i/N]
 
 `--set` takes a dict, e.g. `--set '{recycling_steps: 5}'`. `--limit 1` is the smoke;
 `--limit 0` with `experiment` is a dry materialization (lists runs, executes nothing).
+`--shard i/N` splits a sweep over N concurrent jobs; score in a final unsharded pass.
 """
 from __future__ import annotations
 
@@ -271,9 +272,20 @@ class Ecstasy:
             return
         print(f"leaderboard -> {report_mod.write(out)}")
 
-    def experiment(self, manifest, limit=None, no_score=False):
-        """Run a dataset×model sweep from a manifest YAML."""
-        experiment.run_experiment(manifest, limit=limit, score=not no_score)
+    def experiment(self, manifest, limit=None, no_score=False, profile=False, shard=None):
+        """Run a dataset×model sweep from a manifest YAML.
+
+        --profile measures inference FLOPs for every run in the sweep (same meaning as
+        `run --profile`); the sbatch wrapper goes through here, so without it a
+        cluster-submitted sweep produces P@K but no FLOPs axis.
+
+        --shard 'i/N' spreads the manifest over N concurrent jobs (same meaning as
+        `run --shard`). Shards skip already-written entries, so they never collide and
+        are resumable. Scoring is suppressed while sharding — score in a final pass
+        over the same manifest with no --shard.
+        """
+        experiment.run_experiment(manifest, limit=limit, score=not no_score,
+                                  profile=profile, shard=shard)
 
 
 def main():

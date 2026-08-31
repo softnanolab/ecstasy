@@ -39,18 +39,18 @@ All via `ecstasy msa --datasets <D[,D]> --kind <kind> --phase <prepare|submit|in
 
 ```bash
 # Boltz-2 MSAs (per-chain CSVs)
-ecstasy msa --datasets val_seq_chain --kind boltz_csv --phase submit   # sbatch GPU search
-ecstasy msa --datasets val_seq_chain --kind boltz_csv --phase ingest   # assemble CSVs into store
+ecstasy msa --datasets recent_pp --kind boltz_csv --phase submit   # sbatch GPU search
+ecstasy msa --datasets recent_pp --kind boltz_csv --phase ingest   # assemble CSVs into store
 
 # MSA-Pairformer MSAs (local colabfold-local; how the eval data was made)
-ecstasy msa --datasets val_seq_chain --kind complex --phase submit     # sbatch colabfold-local
+ecstasy msa --datasets recent_pp --kind complex --phase submit     # sbatch colabfold-local
 # (writes straight to the store; `--phase ingest` then just verifies coverage)
 
 # Manual colabfold-local run already done elsewhere? ingest its a3ms (named <pair_hash>.a3m):
-ecstasy msa --datasets val_seq_chain --kind complex --phase ingest --a3m_dir <dir>
+ecstasy msa --datasets recent_pp --kind complex --phase ingest --a3m_dir <dir>
 
 # Network fallback only (NOT the eval path):
-ecstasy msa --datasets val_seq_chain --kind complex_api --phase submit
+ecstasy msa --datasets recent_pp --kind complex_api --phase submit
 ```
 
 Store layout: `$DATA_ROOT/msa_store/{boltz_csv,complex,...}/` keyed by hash.

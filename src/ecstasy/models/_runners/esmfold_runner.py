@@ -61,27 +61,55 @@ def main():
     seq = ":".join(sequences)
     chain_linker = "G" * chain_linker_len
     print(f"[esmfold] linker={chain_linker_len}G  residue_index_offset={residue_index_offset}", flush=True)
-    flops_payload = None
-    with torch.no_grad():
+
+    def _is_oom(exc: BaseException) -> bool:
+        # torch 1.12 has no torch.cuda.OutOfMemoryError (added in 1.13), so match the
+        # message. Keep it narrow — a non-OOM RuntimeError must still propagate.
+        return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+    def _infer():
         if profile:
             # Count the whole infer: the structure module is ON the contact path
             # (it runs inside the recycle loop and feeds the next iteration's pair
             # rep → final distogram), so it must be included. lddt_head/ptm_head are
             # terminal and negligible (<0.01%). See FLOPS_BENCHMARK_PLAN.md §3.5.
-            (output, _), flops_payload = _flops.profile_call(
+            (out, _), payload = _flops.profile_call(
                 model.infer,
                 seq,
                 num_recycles=num_recycles,
                 chain_linker=chain_linker,
                 residue_index_offset=residue_index_offset,
             )
-        else:
-            output, _ = model.infer(
-                seq,
-                num_recycles=num_recycles,
-                chain_linker=chain_linker,
-                residue_index_offset=residue_index_offset,
-            )
+            return out, payload
+        out, _ = model.infer(
+            seq,
+            num_recycles=num_recycles,
+            chain_linker=chain_linker,
+            residue_index_offset=residue_index_offset,
+        )
+        return out, None
+
+    # Axial-attention chunking is a pure memory/speed trade — same arithmetic, so the
+    # contact map and the FLOP count are unchanged by it. Rather than chunk everything
+    # (which would slow the ~100 short entries for the benefit of the long tail) or guess
+    # a length threshold, start unchunked and step down only on OOM. recent_pp reaches
+    # L=1006, and ESMFold OOMs around L~970 on a 40GB A100: a softmax there wants a
+    # single 14.99 GiB allocation.
+    flops_payload = None
+    attempts = [chunk_size] if chunk_size is not None else [None, 128, 64, 32]
+    with torch.no_grad():
+        for i, chunk in enumerate(attempts):
+            if chunk is not None:
+                model.set_chunk_size(int(chunk))
+            try:
+                output, flops_payload = _infer()
+                break
+            except Exception as exc:  # noqa: BLE001
+                if not _is_oom(exc) or i == len(attempts) - 1:
+                    raise
+                print(f"[esmfold] OOM at chunk={chunk}; retrying with "
+                      f"chunk={attempts[i + 1]}", flush=True)
+                torch.cuda.empty_cache()
 
     logits = output["distogram_logits"][0]                 # (L_total, L_total, 64)
     probs = torch.softmax(logits.float(), dim=-1)

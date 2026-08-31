@@ -21,6 +21,7 @@ Runs inside ``.venv-boltz`` (has boltz). Imports ``_flops`` from this directory.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -35,6 +36,27 @@ def _install_patches():
 
     from boltz.model.models.boltz2 import Boltz2
     from boltz.data.write.writer import BoltzWriter
+
+    # `FlopCounterMode` is a TorchDispatchMode, and `torch.inference_mode()` bypasses the
+    # Python dispatch key — so under inference_mode __torch_dispatch__ is never invoked
+    # and every op silently counts as zero. Lightning's Trainer turns inference_mode ON
+    # by default for predict, which is how boltz's forward gets run, so the profiled
+    # numbers came back ~0 (2.9e9 for an L=689 trunk, identical across the whole recycle
+    # ladder). Reproduced minimally on a 3-Linear LightningModule: 2.10e7 counted on a
+    # direct call, 0 via trainer.predict, 2.10e7 again with inference_mode=False, and 0
+    # for a direct call wrapped in torch.inference_mode().
+    #
+    # Force it off for the profiled run only. This is a measurement-only change:
+    # inference_mode vs no_grad does not affect numerics, and the normal (non-profiled)
+    # prediction path shells out to the boltz CLI untouched.
+    import pytorch_lightning as pl
+    _orig_trainer_init = pl.Trainer.__init__
+
+    def _trainer_init_no_inference_mode(self, *args, **kwargs):
+        kwargs["inference_mode"] = False
+        return _orig_trainer_init(self, *args, **kwargs)
+
+    pl.Trainer.__init__ = _trainer_init_no_inference_mode
 
     # Off the contact-map dependency path (plan §3.5). `skip_run_structure` keeps the
     # diffusion sampler (structure_module) + diffusion_conditioning from running at all,
@@ -58,22 +80,59 @@ def _install_patches():
                 run_confidence_sequentially=True,
             )
         total = int(fc.get_total_flops())
-        by_module = _flops._top_level_breakdown(fc.get_flop_counts())
+        raw_counts = fc.get_flop_counts()
+        by_module = _flops._top_level_breakdown(raw_counts)
+
+        # Decision 8c's asserted module set. The contact map cannot be produced without
+        # the pairformer trunk and the distogram head, so if either records no FLOPs the
+        # count is not measuring the contact-dependency subgraph and must not be written.
+        # This is the check that would have caught the inference_mode silent-zero
+        # immediately instead of after a full ladder of identical numbers. Matched as
+        # substrings over the unfiltered counts, so it survives both the depth filter and
+        # the `._orig_mod` unwrapping boltz does at inference.
+        for required in ("pairformer_module", "distogram_module"):
+            seen = sum(int(sum(v.values())) for k, v in raw_counts.items() if required in k)
+            if seen <= 0:
+                raise RuntimeError(
+                    f"FLOPs profiling recorded {seen} for {required!r}: the counter is not "
+                    f"observing the contact-dependency subgraph, so this number is invalid. "
+                    f"total={total} modules={sorted(raw_counts)[:20]}"
+                )
         off_path = int(sum(v for k, v in by_module.items()
                            if k.split(".")[-1] in OFF_PATH))
         flops = total - off_path
+        payload = {
+            "flops": flops,                 # contact-dependency subgraph (true FLOPs)
+            "macs": flops // 2,
+            "flops_total": total,           # whole profiled forward (audit)
+            "off_path_flops": off_path,     # confidence/bfactor subtracted
+            "by_module": by_module,
+            "recycling_steps": int(self.predict_args["recycling_steps"]),
+        }
+        if os.environ.get("ECSTASY_FLOPS_DEBUG"):
+            # Full un-filtered attribution + the model flags that decide whether the
+            # trunk runs eagerly (and so whether FlopCounterMode can observe it).
+            payload["debug"] = {
+                "all_modules": {k: int(sum(v.values())) for k, v in raw_counts.items()},
+                "op_types": sorted({str(op) for v in raw_counts.values() for op in v}),
+                "n_module_paths": len(raw_counts),
+                "flags": {
+                    "use_kernels": getattr(self, "use_kernels", None),
+                    "run_trunk_and_structure": getattr(self, "run_trunk_and_structure", None),
+                    "skip_run_structure": getattr(self, "skip_run_structure", None),
+                    "is_msa_compiled": getattr(self, "is_msa_compiled", None),
+                    "is_pairformer_compiled": getattr(self, "is_pairformer_compiled", None),
+                    "training": bool(self.training),
+                },
+                # If the trunk really ran, the distogram must differ between recycle
+                # counts; a constant checksum here would mean z never left zeros.
+                "pdistogram_sum": float(out["pdistogram"].float().abs().sum().item()),
+            }
         return {
             "exception": False,
             "pdistogram": out["pdistogram"],
             "token_masks": batch["token_pad_mask"],
-            "flops": {
-                "flops": flops,                 # contact-dependency subgraph (true FLOPs)
-                "macs": flops // 2,
-                "flops_total": total,           # whole profiled forward (audit)
-                "off_path_flops": off_path,     # confidence/bfactor subtracted
-                "by_module": by_module,
-                "recycling_steps": int(self.predict_args["recycling_steps"]),
-            },
+            "flops": payload,
         }
 
     def profiled_write_on_batch_end(self, trainer, pl_module, prediction,

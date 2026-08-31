@@ -27,3 +27,6 @@ scripts/*.sbatch
 
 # Local cache of the Notion benchmarking Registry (notion_pull.py output)
 core
+
+# SLURM stdout/stderr — run_experiment.sbatch mkdir -p's this and writes %j files here
+logs/

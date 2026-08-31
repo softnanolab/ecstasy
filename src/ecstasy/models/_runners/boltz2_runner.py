@@ -142,7 +142,10 @@ def main():
         import _flops
         sidecar = _flops.write_flops_sidecar(
             out_dir,
-            {k: payload[k] for k in ("flops", "macs", "flops_total", "off_path_flops", "by_module")
+            # "debug" is only present under ECSTASY_FLOPS_DEBUG; without it in this
+            # whitelist the block is silently dropped here and the flag looks broken.
+            {k: payload[k] for k in ("flops", "macs", "flops_total", "off_path_flops",
+                                     "by_module", "debug")
              if k in payload},
             L=int(contact.shape[0]), msa_depth=None, recycles=recycling_steps, model="boltz2",
         )
