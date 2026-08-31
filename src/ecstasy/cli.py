@@ -75,9 +75,9 @@ class Ecstasy:
             allow_partial=False, null_draws=0):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
-        --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
-        (for models without committed presets, e.g. mentos): the name resolves to concrete
-        weights/recycles via registry.local.yaml (run notion_pull.py first).
+        --checkpoint <name> selects a checkpoint from the committed
+        src/ecstasy/registry/checkpoints.yaml (for models without committed presets, e.g.
+        mentos): the name resolves to concrete weights/recycles via that file.
         --profile additionally measures inference FLOPs and writes a flops.json
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
         --shard 'i/N' processes only every N-th entry (offset i) for parallel jobs;
