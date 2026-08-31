@@ -188,10 +188,16 @@ def check_publishable(rec: dict, allow_partial: bool = False,
                       allow_dirty: bool = False) -> list[str]:
     """Reasons this row should not be published. Empty means go ahead.
 
-    Two refusals, and deliberately only two.
+    Three refusals, and deliberately only three.
 
     **Incomplete coverage.** A mean over part of a split prints identically to a mean
     over all of it; publishing one makes that permanent and quotable.
+
+    **Errored targets.** A run that raised on some targets is not a clean measurement,
+    and the mean silently excludes whatever failed. NOTE this one has no override, unlike
+    the other two -- see the tracking issue for giving it one, since a target that simply
+    cannot be predicted (OOM on a long complex, say) currently makes a whole cell
+    permanently unpublishable.
 
     **A dirty ecstasy tree.** ``ecstasy_sha`` would name a commit that does not contain
     the code that produced the number, which is worse than no provenance at all.
