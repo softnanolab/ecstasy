@@ -1,0 +1,25 @@
+# Boltz-2 (with MSAs) across ecstasy's headline splits.
+#
+# Replaces boltz2_val_splits.yaml, which named the four leakage-controlled MENTOS val
+# splits. Those were retired upstream (MENTOS PR #266) and are no longer registered;
+# the manifest would now fail at `unknown dataset`.
+#
+# Build the dataset folders first (once per machine):
+#   ecstasy import_dataset --dataset recent_pp
+#   ecstasy import_dataset --dataset foldbench_pp
+#   ecstasy import_dataset --dataset foldbench_abag
+#
+# Then the per-chain MSAs Boltz-2 needs (the store dedups by sequence hash, so the
+# three splits do not re-search chains they share):
+#   ecstasy msa --datasets recent_pp,foldbench_pp,foldbench_abag --kind per_chain --phase submit
+#   ecstasy msa --datasets recent_pp,foldbench_pp,foldbench_abag --kind per_chain --phase ingest
+#
+# Run:  ecstasy experiment experiments/boltz2_headline/manifest.yaml
+# Dry:  ecstasy experiment experiments/boltz2_headline/manifest.yaml --limit 0
+name: boltz2_headline
+datasets:
+  - recent_pp        # 151, temporally held out, full-atom GT (scores DockQ too)
+  - foldbench_pp     # 193, protein-protein interfaces
+  - foldbench_abag   # 137, antibody-antigen — report beside pp, never averaged in
+runs:
+  - {model: boltz2, preset: full}

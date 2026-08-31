@@ -251,9 +251,16 @@ _MENTOS_LABEL = {
 }
 
 # Friendly dataset titles (the plot title is just the dataset name).
+# val_seq_pair / val_pinder_pair are kept so old campaign plots still render their
+# titles; both splits were retired upstream (MENTOS PR #266) and are no longer
+# registered, so nothing new can be produced on them.
 _DATASET_TITLE = {
-    "val_seq_pair": "V1: Sequence Deleak Dataset",
-    "val_pinder_pair": "V2: Interface Deleak Dataset",
+    "val_seq_pair": "V1: Sequence Deleak Dataset (retired)",
+    "val_pinder_pair": "V2: Interface Deleak Dataset (retired)",
+    "recent_pp": "Recent-PP: Temporally Held-Out Dimers",
+    "foldbench_pp": "FoldBench: Protein-Protein Interfaces",
+    "foldbench_abag": "FoldBench: Antibody-Antigen Interfaces",
+    "foldbench": "FoldBench: PPI + Antibody-Antigen",
 }
 
 

@@ -19,12 +19,20 @@ from pathlib import Path
 
 import numpy as np
 
+from ecstasy import fingerprint as fp
 from ecstasy.config import settings
 from ecstasy.datasets import Dataset, load_dataset
+from ecstasy.metrics import DEFAULT_CONTACT_METRICS
 from ecstasy.models import ModelRun, load_model, predict_one
 from ecstasy.msa import store
 
+#: Columns the comparison table reports. The scored metric set is per-run and lives in
+#: result.json["metrics"]; this is only what `compare` puts in its fixed columns.
 _METRIC_KEYS = ["AUC", "P@K", "P@K/2", "P@K/5"]
+#: Structure keys aggregated when a run produced them. Order is the reporting order, and
+#: it puts the RMSD terms immediately after DockQ on purpose — see `_structure_summary`.
+_STRUCTURE_KEYS = ["DockQ", "Fnat", "iRMSD", "LRMSD", "TM_mean", "TM_min",
+                   "CA_RMSD_mean", "null_DockQ_mean", "null_DockQ_max"]
 
 
 @dataclass(frozen=True)
@@ -48,10 +56,15 @@ class Run:
     def result_path(self) -> Path:
         return self.out_dir / "result.json"
 
+    @property
+    def provenance_path(self) -> Path:
+        return self.out_dir / "provenance.json"
+
     def write_params(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.params_path.write_text(json.dumps({
             "dataset": self.dataset.name,
+            "dataset_version": self.dataset.version,
             "model": self.model.name,
             "preset": self.model.preset,
             "variant": self.model.variant,
@@ -59,6 +72,69 @@ class Run:
             "params": self.model.params,
             "infra": self.model.infra,
         }, indent=1, default=str))
+
+    @property
+    def prediction_fp_path(self) -> Path:
+        return self.out_dir / "prediction_fingerprint.json"
+
+    @property
+    def scoring_fp_path(self) -> Path:
+        return self.out_dir / "scoring_fingerprint.json"
+
+    def check_prediction_fingerprint(self, force: bool = False) -> dict:
+        """Refuse to reuse a run directory whose predictions came from different inputs.
+
+        This is what makes the ``contact.npz`` skip safe. Without it, bumping a
+        dependency silently mixes old predictions into a new run — the persisted version
+        of the same hazard as editing ``src/`` mid-sweep.
+
+        ``force`` recomputes in place and re-stamps the fingerprint; it is the deliberate
+        escape hatch, never the default.
+        """
+        current = fp.make("prediction", fp.prediction_inputs(self.model, self.dataset))
+        previous = fp.load(self.prediction_fp_path)
+        if previous and previous.get("digest") != current["digest"]:
+            diffs = fp.compare(previous, current)
+            if not force:
+                raise fp.FingerprintMismatch("prediction", diffs, self.out_dir)
+            print(f"[force] prediction inputs changed ({len(diffs)} difference(s)); "
+                  f"recomputing in place")
+            for d in diffs[:8]:
+                print(f"    {d}")
+            # Stale predictions must go, or --force would silently keep exactly the
+            # mixture it was invoked to resolve.
+            for old in self.predictions_dir.glob("*/contact.npz"):
+                old.unlink()
+        fp.save(self.prediction_fp_path, current)
+        return current
+
+    def check_scoring_fingerprint(self, metrics) -> dict:
+        """Record what the scores were computed from. Scoring is cheap, so a change here
+        never blocks — it simply re-scores and re-stamps."""
+        current = fp.make("scoring", fp.scoring_inputs(self.dataset, metrics))
+        previous = fp.load(self.scoring_fp_path)
+        if previous and previous.get("digest") != current["digest"]:
+            print(f"[rescore] scoring inputs changed: "
+                  f"{'; '.join(fp.compare(previous, current)[:4])}")
+        fp.save(self.scoring_fp_path, current)
+        return current
+
+    def write_provenance(self) -> dict:
+        """Record which code and which bytes produced this run.
+
+        Without it two different experiments serialise identically: the MiniFold runner
+        takes ``minifold_src`` as a *path*, and whether the residx patch is applied inside
+        that tree is the whole difference between the intended chain break and the
+        linker-only variant. ``params.json`` records only the path. This records the
+        commit and the dirty flag, so the two stop being indistinguishable.
+        """
+        from ecstasy import provenance
+
+        rec = provenance.capture(params=self.model.params, env=self.model.env)
+        rec["dataset"] = {**self.dataset.manifest(), "fingerprint": self.dataset.fingerprint()}
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.provenance_path.write_text(json.dumps(rec, indent=1, default=str))
+        return rec
 
 
 def make_run(dataset: str, model: str, preset: str | None = None,
@@ -68,8 +144,15 @@ def make_run(dataset: str, model: str, preset: str | None = None,
 
 
 def run_predict(run: Run, limit: int | None = None, profile: bool = False,
-                shard: str | None = None) -> None:
+                shard: str | None = None, force: bool = False) -> None:
+    # Gate BEFORE anything is written. The cached-prediction skip below is only safe if
+    # the cache was produced by the same inputs; otherwise this run would reuse old
+    # predictions under a new provenance record and look entirely normal.
+    run.check_prediction_fingerprint(force=force)
     run.write_params()
+    prov = run.write_provenance()
+    from ecstasy import provenance as _prov
+    print(f"[provenance] {_prov.summarise(prov)}")
     # shard = "i/N": process only entries with index % N == i (for parallel jobs;
     # combined with the contact.npz skip, shards never collide and are resumable).
     si, sn = 0, 1
@@ -104,10 +187,15 @@ def run_predict(run: Run, limit: int | None = None, profile: bool = False,
     print(f"\nDone. processed {n} entries -> {run.predictions_dir}")
 
 
-def run_score(run: Run, limit: int | None = None) -> None:
+def run_score(run: Run, limit: int | None = None,
+              metrics: tuple[str, ...] | None = None,
+              allow_partial: bool = False, null_draws: int = 0) -> None:
+    metrics = tuple(metrics) if metrics else DEFAULT_CONTACT_METRICS
+    scoring_fp = run.check_scoring_fingerprint(metrics)
     per_protein: dict[str, dict] = {}
     skipped: list[tuple[str, str]] = []
     errors: list[tuple[str, str]] = []
+    struct_skipped: list[tuple[str, str]] = []
     n = 0
     for entry in run.dataset.entries():
         if limit is not None and n >= int(limit):
@@ -118,7 +206,7 @@ def run_score(run: Run, limit: int | None = None) -> None:
             skipped.append((entry.id, "no contact.npz"))
             continue
         try:
-            res = run.dataset.score(entry, contact_path)
+            res = run.dataset.score(entry, contact_path, metrics=metrics)
         except FileNotFoundError as e:
             skipped.append((entry.id, str(e)))
             continue
@@ -127,33 +215,156 @@ def run_score(run: Run, limit: int | None = None) -> None:
             continue
         if "_skipped" in res:
             skipped.append((entry.id, res["_skipped"]))
-        elif "_error" in res:
+            continue
+        if "_error" in res:
             errors.append((entry.id, res["_error"]))
-        else:
-            per_protein[entry.id] = {k: float(v) for k, v in res.items()}
+            continue
+        res = dict(res)
+        # Structure scoring is strictly additive: it runs only when the model emitted a
+        # structure AND the dataset has full-atom GT, and a failure here never discards
+        # the contact metrics this target already earned.
+        structure_path = run.predictions_dir / entry.id / "structure.npz"
+        if structure_path.exists() and run.dataset.has_structure_gt:
+            try:
+                s = run.dataset.score_structure(
+                    entry, structure_path, work_dir=structure_path.parent,
+                    null_draws=null_draws)
+            except Exception as e:  # noqa: BLE001
+                struct_skipped.append((entry.id, f"{type(e).__name__}: {e}"))
+            else:
+                if "_skipped" in s or "_error" in s:
+                    struct_skipped.append((entry.id, s.get("_skipped") or s["_error"]))
+                else:
+                    res.update(s)
+        per_protein[entry.id] = {k: float(v) for k, v in res.items()}
+
+    # Coverage is scoped to what was actually asked for: with --limit N the run only ever
+    # intended N targets, so completeness is measured against that, not the whole split.
+    n_intended = int(limit) if limit is not None else run.dataset.coverage()["n_entries"]
+    covered = len(per_protein) / n_intended if n_intended else 0.0
+    complete = len(per_protein) == n_intended
 
     aggregate: dict = {
         "dataset": run.dataset.name, "model": run.model.name, "variant": run.model.variant,
+        "metrics": list(metrics),
+        "scoring_fingerprint": scoring_fp["digest"],
+        "prediction_fingerprint": (fp.load(run.prediction_fp_path) or {}).get("digest"),
+        "coverage": {"n_evaluated": len(per_protein), "n_intended": n_intended,
+                     "fraction": covered, "complete": complete,
+                     "limit": limit},
         "summary": {"n_evaluated": len(per_protein), "n_skipped": len(skipped),
                     "n_errors": len(errors)},
         "per_protein": per_protein,
         "skipped_first_20": skipped[:20], "errors_first_20": errors[:20],
     }
-    if per_protein:
-        arrs = {k: np.array([v[k] for v in per_protein.values()
-                             if not np.isnan(v.get(k, np.nan))]) for k in _METRIC_KEYS}
-        aggregate["summary"]["mean"] = {k: float(arrs[k].mean()) if arrs[k].size else float("nan")
-                                        for k in _METRIC_KEYS}
-        aggregate["summary"]["median"] = {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
-                                          for k in _METRIC_KEYS}
+    # Provenance travels WITH the result, not only beside it. A result.json that outlives
+    # its run directory still names the code and the split that produced it.
+    aggregate["provenance"] = (json.loads(run.provenance_path.read_text())
+                               if run.provenance_path.exists() else run.write_provenance())
+
+    # The ONLY thing partial-ness changes is whether a headline mean is computed. A mean
+    # over 8% of a split prints identically to a mean over all of it, so withholding it is
+    # the one reliable way to stop it being quoted — but the per-protein numbers are
+    # written either way, so nothing is lost by refusing.
+    if not complete:
+        aggregate["summary"]["partial"] = True
+    if struct_skipped:
+        aggregate["summary"]["n_structure_skipped"] = len(struct_skipped)
+        aggregate["structure_skipped_first_20"] = struct_skipped[:20]
+    if per_protein and (complete or allow_partial):
+        aggregate["summary"].update(_summarise(per_protein, metrics))
+        scored = [v for v in per_protein.values() if "DockQ" in v]
+        if scored:
+            aggregate["summary"]["structure"] = _structure_summary(scored)
+    elif not complete:
+        aggregate["summary"]["partial_reason"] = (
+            f"scored {len(per_protein)}/{n_intended} targets ({covered:.1%}). No headline "
+            f"mean was computed. Re-run with allow_partial=True to publish it as partial, "
+            f"or supply the missing predictions/ground truth.")
 
     run.out_dir.mkdir(parents=True, exist_ok=True)
     run.result_path.write_text(json.dumps(aggregate, indent=1))
+    _print_result(run, aggregate)
+
+
+def _summarise(per_protein: dict[str, dict], metrics: tuple[str, ...]) -> dict:
+    """Mean and median over whatever was actually computed.
+
+    Keyed off the requested metrics rather than a fixed list, which is what lets a run ask
+    for P@K(tol=2) and have it summarised without a code change.
+    """
+    keys = [k for k in metrics if any(k in v for v in per_protein.values())]
+    arrs = {k: np.array([v[k] for v in per_protein.values()
+                         if not np.isnan(v.get(k, np.nan))]) for k in keys}
+    return {
+        "mean": {k: float(arrs[k].mean()) if arrs[k].size else float("nan") for k in keys},
+        "median": {k: float(np.median(arrs[k])) if arrs[k].size else float("nan")
+                   for k in keys},
+    }
+
+
+def _structure_summary(rows: list[dict]) -> dict:
+    """DockQ summary: central tendency, quality bands, and the homodimer split.
+
+    Three things here are deliberate, each because reporting it the other way produced a
+    wrong conclusion on this codebase (see CLAUDE.md):
+
+    * **iRMSD and LRMSD sit beside DockQ, always.** DockQ averages fnat with two RMSD
+      terms, so a model that has docked nothing still scores — and scores highest exactly
+      where its geometry is worst.
+    * **`mean` is listed before `median`.** Median is the statistic the fnat floor
+      corrupts most; a median-led reading of this benchmark has inverted the ranking of
+      two models more than once.
+    * **The homodimer split is NAMED for the definition it uses.** "Homodimer" has meant
+      two different things on the same split — the dataset flag (129 of 151) and exact
+      chain-sequence equality (39) — because sequences can differ purely in how much was
+      experimentally resolved. The key says which was used; the dataset's
+      ``composition()`` carries the full identity distribution for any other threshold.
+    """
+    from ecstasy.metrics.structure import dockq_bands
+
+    def finite(key):
+        return [v[key] for v in rows if not np.isnan(v.get(key, np.nan))]
+
+    out: dict = {"n": len(rows)}
+    out.update(_summarise({str(i): r for i, r in enumerate(rows)}, _STRUCTURE_KEYS))
+    out.update(dockq_bands(finite("DockQ")))
+
+    labelled = [v for v in rows if "is_homodimer" in v]
+    if labelled:
+        groups = {"homodimer_flag": [v for v in labelled if v["is_homodimer"] >= 0.5],
+                  "heterodimer_flag": [v for v in labelled if v["is_homodimer"] < 0.5]}
+        out["split_definition"] = ("dataset is_homodimer flag; see dataset.composition() "
+                                   "for the chain-identity distribution")
+        for label, subset in groups.items():
+            if not subset:
+                continue
+            scores = [v["DockQ"] for v in subset if not np.isnan(v.get("DockQ", np.nan))]
+            out[label] = {"n": len(subset),
+                          **_summarise({str(i): r for i, r in enumerate(subset)},
+                                       _STRUCTURE_KEYS),
+                          **dockq_bands(scores)}
+    return out
+
+
+def _print_result(run: Run, aggregate: dict) -> None:
     s = aggregate["summary"]
     if "mean" in s:
+        headline = " ".join(f"{k}={s['mean'][k]:.3f}" for k in list(s["mean"])[:4])
         print(f"[{run.dataset.name}/{run.model.name}/{run.model.variant}] "
-              f"n={s['n_evaluated']} mean P@K={s['mean']['P@K']:.3f} "
-              f"AUC={s['mean']['AUC']:.3f} skipped={s['n_skipped']} errors={s['n_errors']}")
+              f"n={s['n_evaluated']} {headline} "
+              f"skipped={s['n_skipped']} errors={s['n_errors']}")
+    if "structure" in s:
+        st = s["structure"]
+        # iRMSD/LRMSD printed with DockQ, never without — see _structure_summary.
+        print(f"  structure n={st['n']} DockQ mean={st['mean']['DockQ']:.3f} "
+              f"median={st['median']['DockQ']:.3f} "
+              f"iRMSD={st['mean']['iRMSD']:.2f}A LRMSD={st['mean']['LRMSD']:.2f}A "
+              f"acceptable={st['acceptable_fraction']:.3f}")
+    if s.get("partial_reason"):
+        print(f"[partial] {s['partial_reason']}")
+    elif s.get("partial"):
+        print(f"[warn] partial result accepted — means are over the scored subset only")
     print(f"result -> {run.result_path}")
 
 

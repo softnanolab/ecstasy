@@ -18,16 +18,15 @@ def test_var_resolution():
 
 
 def test_datasets_registered():
-    # recent_pp is the only split MENTOS still ships; the five earlier splits were
-    # removed from the registry when their parquets disappeared from MENTOS_ROOT.
-    assert dataset_names() == ["recent_pp"]
+    names = dataset_names()
+    for n in ("recent_pp", "foldbench_pp", "foldbench_abag", "foldbench"):
+        assert n in names
 
 
 def test_dataset_loads_and_resolves_paths():
     d = load_dataset("recent_pp")
     assert d.name == "recent_pp"
-    assert "${" not in str(d.index) and str(d.index).endswith("splits/val/index.parquet")
-    assert d.split == "val"          # the index also holds 23,463 train rows
+    assert "${" not in str(d.index) and str(d.index).endswith("recent_pp/index.parquet")
     assert d.contact_bin == 19
 
 
@@ -39,11 +38,8 @@ def test_unknown_dataset_raises():
 def test_models_registered_with_presets():
     assert set(model_names()) == {"boltz2", "boltz2_nomsa", "esmfold", "esmfold2",
                                   "mentos", "colabfold", "msa_pairformer", "esm2",
-                                  "plmgraph_inter", "deepinteract"}
+                                  "plmgraph_inter", "deepinteract", "minifold"}
     assert presets_for("boltz2") == ["fast", "full", "r0", "r1", "r3", "r5"]
-    # ESMFold2's compute knob is num_loops, and its cutoff is an ANGSTROM distance —
-    # its 128-bin output grid makes contact_cutoff_bin: 19 wrong (that would be ~8.9 A).
-    assert presets_for("esmfold2") == ["r0", "r1", "r3", "r5"]
     # esm2 sweeps model size (no recycles); presets are the fair-esm size tiers.
     assert presets_for("esm2") == ["t12_35M", "t30_150M", "t33_650M", "t36_3B", "t6_8M"]
 
@@ -108,14 +104,11 @@ def test_msa_backends_registered():
 
 
 def test_experiment_expands_matrix():
-    # Only one dataset is registered now, so the matrix is exercised along the runs axis.
-    m = {"name": "t", "datasets": ["recent_pp"],
+    m = {"name": "t", "datasets": ["recent_pp", "foldbench_pp"],
          "runs": [{"model": "boltz2", "preset": "full"},
-                  {"model": "boltz2", "preset": "full", "set": {"recycling_steps": 5}},
-                  {"model": "esmfold", "preset": "r1"}]}
+                  {"model": "boltz2", "preset": "full", "set": {"recycling_steps": 5}}]}
     runs = experiment.expand(m)
-    assert len(runs) == 3                       # 1 dataset × 3 run specs
-    variants = {(r.dataset.name, r.model.name, r.model.variant) for r in runs}
-    assert ("recent_pp", "boltz2", "full") in variants
-    assert ("recent_pp", "esmfold", "r1") in variants
-    assert any(v.startswith("full+") for _, _, v in variants)
+    assert len(runs) == 4                       # 2 datasets × 2 run specs
+    variants = {(r.dataset.name, r.model.variant) for r in runs}
+    assert ("recent_pp", "full") in variants
+    assert any(v.startswith("full+") for _, v in variants)

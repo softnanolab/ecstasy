@@ -13,6 +13,9 @@
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import fire
 
 from ecstasy.datasets import dataset_names
@@ -69,31 +72,205 @@ class Ecstasy:
             raise ValueError(f"--phase must be prepare|submit|ingest, got {phase!r}")
 
     def run(self, dataset, model, preset=None, set=None, limit=None, no_score=False,
-            profile=False, checkpoint=None, shard=None):
+            profile=False, checkpoint=None, shard=None, force=False,
+            allow_partial=False, null_draws=0):
         """Predict (and score, unless --no_score) over the dataset×model matrix.
 
-        --checkpoint <name> selects a checkpoint from the Notion benchmarking Registry
-        (for models without committed presets, e.g. mentos): the name resolves to concrete
-        weights/recycles via registry.local.yaml (run notion_pull.py first).
+        --checkpoint <name> selects a checkpoint from the committed
+        src/ecstasy/registry/checkpoints.yaml (for models without committed presets, e.g.
+        mentos): the name resolves to concrete weights/recycles via that file.
         --profile additionally measures inference FLOPs and writes a flops.json
         sidecar next to each contact.npz (see FLOPS_BENCHMARK_PLAN.md).
         --shard 'i/N' processes only every N-th entry (offset i) for parallel jobs;
         combined with the contact.npz skip the shards never collide and are resumable.
+        --force recomputes when the prediction inputs changed (model code, weights,
+        params, dataset index). Without it such a run is REFUSED, because reusing the
+        cached predictions would mix outputs from two code versions into one result
+        that looks entirely normal.
+        --allow_partial permits a headline mean over an incomplete set of targets.
         """
         for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
-            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard)
+            pipeline.run_predict(r, limit=limit, profile=profile, shard=shard, force=force)
             if not no_score:
-                pipeline.run_score(r, limit=limit)
+                pipeline.run_score(r, limit=limit, allow_partial=allow_partial,
+                                   null_draws=null_draws)
 
-    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None):
-        """Score existing predictions over the dataset×model matrix."""
+    def score(self, dataset, model, preset=None, set=None, limit=None, checkpoint=None,
+              metrics=None, allow_partial=False, null_draws=0):
+        """Score existing predictions over the dataset×model matrix.
+
+        --metrics 'P@K,P@K(tol=2)' selects registered metrics by name; see
+        `ecstasy metrics`. Defaults to the canonical set, so adding a metric to the
+        registry never silently changes a headline number.
+        """
         for r in _matrix(dataset, model, preset, set, checkpoint):
-            pipeline.run_score(r, limit=limit)
+            pipeline.run_score(r, limit=limit, metrics=_as_list(metrics) or None,
+                               allow_partial=allow_partial, null_draws=null_draws)
+
+    def import_dataset(self, dataset, dest=None, name=None, overwrite=False, limit=None):
+        """Build a dataset folder from its `built_from` recipe. Run this once per dataset.
+
+        Converts the source's ground truth into ecstasy's pickle-free per-entry format
+        and writes an index filtered to this dataset's rows, so the resulting folder can
+        be scored with numpy and pandas alone — no MENTOS, no torch, no unpickling a
+        class that has to stay importable, and no dependence on the source surviving.
+
+        The source is read HERE, ONCE. Afterwards nothing on the scoring path can reach
+        it: `built_from` is dropped when a dataset is loaded. That is what lets MENTOS
+        rebuild, move or purge a split without touching a published result.
+
+        Reports exactly which entries had no ground truth, so a partial split is a
+        visible fact rather than a silently reduced mean later.
+
+        Default destination is the row's `root` ($DATA_ROOT/datasets/<name>).
+        """
+        from ecstasy.datasets.base import dataset_source, load_dataset
+        from ecstasy.datasets.importer import import_from_mentos, source_from_spec
+
+        spec = dataset_source(dataset)
+        if spec is None:
+            raise SystemExit(
+                f"{dataset!r} has no `built_from` recipe in datasets.yaml, so there is "
+                f"nothing to import from. Add one naming the source index and gt_root.")
+        target = load_dataset(dataset)
+        src = source_from_spec(spec, dataset)
+        name = name or dataset
+        if dest:
+            dest = Path(dest)
+        elif name == dataset:
+            dest = Path(target.root)
+        else:
+            # Renaming without a destination would write a folder called `name` into the
+            # registered dataset's own root, overwriting it under a different identity.
+            from ecstasy.config import settings
+            dest = settings().DATA_ROOT / "datasets" / name
+        identity = {
+            "version": target.version,
+            "description": target.description,
+            "tags": target.tags,
+            "contact_bin": getattr(target, "contact_bin", 19),
+            "partial_import": limit is not None,
+        }
+        report = import_from_mentos(src, dest, name=name, overwrite=overwrite,
+                                    limit=limit, identity=identity)
+        print(report.summary())
+        if limit is not None:
+            print(f"\nPARTIAL: limited to {limit} entries. The folder is marked "
+                  f"partial_import and `ecstasy datasets --verify` will say so — it is "
+                  f"a smoke test, not {name}.")
+        if not report.complete:
+            print("\nIncomplete. The folder is usable for the entries it has, but a run "
+                  "over it will be partial and `ecstasy score` will refuse a headline "
+                  "mean without allow_partial=True.")
+        return None
+
+    def metrics(self, kind=None, json_out=False):
+        """List registered metrics — the reusable set available to any run or plot."""
+        from ecstasy.metrics import registry
+        rows = registry.describe(kind=kind)
+        if json_out:
+            print(json.dumps(rows, indent=1))
+            return
+        for m in rows:
+            params = f"  {m['params']}" if m["params"] else ""
+            arrow = "higher is better" if m["higher_is_better"] else "lower is better"
+            print(f"  {m['name']:18} [{m['kind']}, {arrow}]{params}\n"
+                  f"      {m['description']}")
+
+    def datasets(self, verify=False, json_out=False):
+        """Describe registered datasets; --verify checks each split against its row.
+
+        `verify` walks each index and reports entry-count drift — a split is a file that
+        nothing stops from changing under a published result, so the declared
+        `expected_entries` is asserted rather than trusted.
+        """
+        from ecstasy.datasets.base import dataset_manifests, dataset_names, load_dataset
+        if verify:
+            reports = [load_dataset(n).verify() for n in dataset_names()]
+            if json_out:
+                print(json.dumps(reports, indent=1))
+            else:
+                for r in reports:
+                    mark = "ok  " if r["ok"] else "FAIL"
+                    print(f"  [{mark}] {r['name']:24} n={r['n_entries']} "
+                          f"expected={r['expected_entries']}")
+                    for p in r["problems"]:
+                        print(f"         - {p}")
+            if any(not r["ok"] for r in reports):
+                raise SystemExit(1)
+            return
+        manifests = dataset_manifests()
+        if json_out:
+            print(json.dumps(manifests, indent=1))
+            return
+        for m in manifests:
+            print(f"  {m['name']:24} v{m['version']}  n={m['expected_entries']}  "
+                  f"tags={','.join(m['tags'])}")
+            print(f"      {' '.join((m['description'] or '(no description)').split())}")
 
     def compare(self, dataset):
         """Aggregate all runs for a dataset into comparison.{csv,md}."""
         pipeline.run_compare(dataset)
+
+    def publish(self, dataset, model, preset=None, set=None, checkpoint=None,
+                allow_partial=False, allow_dirty=False, again=False, report=True):
+        """Append a scored run to the committed record (`results/runs.jsonl`).
+
+        Deliberate, never automatic: a `--limit 1` smoke and an abandoned experiment
+        must not silently become the number other people quote.
+
+        A row is keyed by dataset, model, variant and BOTH fingerprints, so re-scoring
+        after a metric fix appends a new row against identical predictions rather than
+        editing the old one — `git log -p results/runs.jsonl` then shows a number moving
+        and what changed underneath it. Re-publishing identical fingerprints is refused
+        (`--again` records a deliberate repeat).
+
+        Summaries only; per-protein detail stays in $DATA_ROOT. Regenerates
+        results/LEADERBOARD.md unless --report=False. Commit both together.
+        """
+        from ecstasy import report as report_mod
+        from ecstasy import results
+
+        for r in _matrix(dataset, model, preset, set, checkpoint):
+            if not r.result_path.exists():
+                raise SystemExit(
+                    f"{r.dataset.name} x {r.model.name}/{r.model.variant} has no "
+                    f"result.json at {r.result_path}. Score it first.")
+            try:
+                rec, note = results.publish(
+                    r.result_path, allow_partial=allow_partial,
+                    allow_dirty=allow_dirty, again=again)
+            except results.PublishRefused as e:
+                raise SystemExit(str(e)) from None
+            key = results.Key.from_record(rec)
+            print(f"published {key.short()}")
+            if note:
+                print(f"  note: {note}")
+            mean = (rec["metrics"].get("mean") or {})
+            if mean:
+                print("  " + "  ".join(f"{k}={v:.4f}" for k, v in mean.items()
+                                       if isinstance(v, float)))
+            st = (rec.get("structure") or {}).get("mean") or {}
+            if st:
+                print(f"  DockQ={st.get('DockQ', float('nan')):.4f} "
+                      f"iRMSD={st.get('iRMSD', float('nan')):.2f}A "
+                      f"LRMSD={st.get('LRMSD', float('nan')):.2f}A")
+        if report:
+            print(f"\nleaderboard -> {report_mod.write()}")
+
+    def report(self, out=None, show=False):
+        """Regenerate results/LEADERBOARD.md from the committed results.
+
+        Reads only `results/runs.jsonl`, so it needs no network, no token and no
+        $DATA_ROOT — an agent picking up a task can see what has already been
+        benchmarked from the repo alone.
+        """
+        from ecstasy import report as report_mod
+        if show:
+            print(report_mod.render())
+            return
+        print(f"leaderboard -> {report_mod.write(out)}")
 
     def experiment(self, manifest, limit=None, no_score=False, profile=False, shard=None):
         """Run a dataset×model sweep from a manifest YAML.

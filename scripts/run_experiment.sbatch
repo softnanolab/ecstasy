@@ -10,7 +10,7 @@
 #SBATCH --partition=gpu
 #SBATCH --qos=freegpu
 # Generic experiment runner. Usage:
-#   sbatch scripts/run_experiment.sbatch experiments/recent_pp_nomsa_ladder.yaml --profile
+#   sbatch scripts/run_experiment.sbatch experiments/recent_pp_nomsa_ladder/manifest.yaml --profile
 #
 # --mem is NOT optional. This cluster defaults to ~1G per CPU, and ESMFold silently
 # livelocks under that: loading it needs the 2.7G esmfold_3B_v1 state dict plus the 5.6G
@@ -40,6 +40,9 @@
 # `mentos` are broken in every venv on this machine — they point at a deleted worktree —
 # so both source trees go on PYTHONPATH and we invoke `python -m ecstasy.cli` rather than
 # the `ecstasy` console script (which does not exist there either).
+#   sbatch scripts/run_experiment.sbatch experiments/boltz2_headline/manifest.yaml [extra ecstasy args]
+# Runs in .venv-boltz (has ecstasy + torch + mentos, so predict subprocesses to
+# each model's env and scoring can load the MENTOS GT here).
 set -euo pipefail
 # Do NOT derive REPO_ROOT from ${BASH_SOURCE[0]}: sbatch copies this file to a spool dir
 # and runs the copy, so under SLURM that resolves to /var/spool/slurm/d and every path
