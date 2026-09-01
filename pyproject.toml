@@ -31,6 +31,15 @@ dev = [
     "pytest",
     "black",
 ]
+# Structure/DockQ scoring. Deliberately NOT part of [dev]: DockQ ships a C extension
+# and has no wheel for every platform+interpreter combination we use, so it compiles
+# from source and needs Python development headers. Folding it into [dev] would break
+# environment creation on any interpreter lacking them (both clusters' system pythons
+# do lack them). Opt in with `.[structure]` on an interpreter that has headers -- a
+# uv-managed one does; see BENCHMARKING.md.
+structure = [
+    "DockQ>=2.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

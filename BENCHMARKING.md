@@ -58,6 +58,38 @@ that has to stay importable.
 | `foldbench_abag` | 137 | FoldBench antibody-antigen. Report beside `foldbench_pp`, never averaged in |
 | `foldbench` | 330 | the union of `foldbench_pp` and `foldbench_abag` |
 
+### Structure scoring prerequisites
+
+Structure metrics (DockQ, iRMSD, LRMSD, Fnat, TM) need the **`DockQ` CLI on `PATH`** --
+`ecstasy.metrics.structure.dockq_binary()` is `shutil.which("DockQ")`, and every structure
+metric returns *skipped* without it. That is a quiet failure mode: a sweep will complete and
+publish contact metrics while silently reporting no DockQ at all.
+
+Install it as an opt-in extra:
+
+```bash
+uv pip install -e '.[structure]'
+```
+
+**It needs Python development headers.** DockQ compiles a C extension and has no wheel for
+every platform+interpreter pair here, so on an interpreter without `Python.h` the build fails
+with `compilation terminated`. Neither cluster's *system* python carries headers; a
+uv-managed interpreter does:
+
+```bash
+uv python install 3.11
+uv venv <path> --python 3.11 --python-preference only-managed
+```
+
+Verified end-to-end by `tests/integration/test_score_structure.py`, which feeds a split's own
+native coordinates back in as if they were a prediction and requires DockQ 1.0 -- anything
+less means the structure was corrupted between the `.npz` and the scorer. It is skipped
+automatically when the CLI is absent, so check it actually *ran* before trusting a green run.
+
+Note the separate gap: full-atom ground truth is present for **every** registered split, but
+only the `minifold` runner currently writes `structure.npz`, so DockQ is not yet obtainable
+for the other models regardless of the CLI being installed.
+
 Two of these **overlap**: `foldbench_pp_post2024` is a strict subset of `foldbench_pp`,
 and `foldbench` contains both `foldbench_pp` and `foldbench_abag`. Overlapping sets are
 not independent evidence — report them side by side, never pooled, and never as if a
