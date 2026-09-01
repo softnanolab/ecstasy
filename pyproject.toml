@@ -40,6 +40,13 @@ dev = [
 structure = [
     "DockQ>=2.1",
 ]
+# Mirroring the committed record into Weights & Biases. Opt-in for the same reason
+# as [structure]: `ecstasy publish` and `ecstasy report` must keep working with no
+# network and no token, which is the property that lets an agent read the benchmark
+# state from the repo alone.
+wandb = [
+    "wandb>=0.17",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
