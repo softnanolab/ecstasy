@@ -58,6 +58,43 @@ that has to stay importable.
 | `foldbench_abag` | 137 | FoldBench antibody-antigen. Report beside `foldbench_pp`, never averaged in |
 | `foldbench` | 330 | the union of `foldbench_pp` and `foldbench_abag` |
 
+### Publishing to Weights & Biases
+
+`results/runs.jsonl` is the source of truth. wandb is a **derived view** of it, in exactly
+the sense `results/LEADERBOARD.md` is — so it is regenerated, not maintained:
+
+```bash
+uv pip install -e '.[wandb]'    # opt-in extra
+wandb login                     # or a ~/.netrc entry for api.wandb.ai
+ecstasy wandb --dry_run         # inspect the projection, no network
+ecstasy wandb                   # one wandb run per published row
+```
+
+**Export is idempotent.** A run's wandb id is a digest of the row's dataset, model,
+variant and *both* fingerprints, so re-running converges instead of creating duplicates.
+Re-scoring after a metric fix changes the scoring fingerprint and therefore appears as a
+**new** wandb run — the same "the number moved, and here is what changed underneath it"
+history that the append-only JSONL gives you in `git log -p`.
+
+`ecstasy publish --wandb` mirrors as it publishes, but the export runs strictly after the
+row is appended and a failure is a warning, not an error. `publish` and `report` are
+deliberately usable with no network and no token; that property is what lets someone read
+the benchmark state from the repo alone, and it is not traded away for convenience.
+
+Two conventions worth knowing before reading the runs table:
+
+- **An unmeasured quantity is absent, not zero.** A row with no FLOPs sets
+  `flops/measured = False` and omits the number entirely. This is live today: ESMFold2's
+  FLOPs are refused because its ESMC-6B backbone is uncounted (#62), and a zero would put
+  the strongest model at the origin of the compute axis looking measured.
+- **Caveats are tags.** The leaderboard's `†` (dirty model tree), `‡` (dirty ecstasy tree)
+  and `*` (partial coverage) become `dirty-model-tree`, `dirty-ecstasy-tree` and
+  `partial-coverage`. Someone filtering the runs table is as entitled to know that a
+  recorded commit does not describe what ran as someone reading the markdown.
+
+Compute-node egress to `api.wandb.ai` is direct on Isambard, so a sweep can log live;
+`WANDB_MODE=offline` plus `wandb sync` remains available for hosts where it is not.
+
 ### Structure scoring prerequisites
 
 Structure metrics (DockQ, iRMSD, LRMSD, Fnat, TM) need the **`DockQ` CLI on `PATH`** --

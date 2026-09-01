@@ -5,6 +5,7 @@
   ecstasy run     --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N] [--no_score]
   ecstasy score   --dataset D[,D] --model M[,M] [--preset P] [--set '{k: v}'] [--limit N]
   ecstasy compare --dataset D
+  ecstasy wandb   [--project P] [--entity E] [--dry_run]
   ecstasy experiment <manifest.yaml> [--limit N] [--no_score] [--profile] [--shard i/N]
 
 `--set` takes a dict, e.g. `--set '{recycling_steps: 5}'`. `--limit 1` is the smoke;
@@ -89,6 +90,7 @@ class Ecstasy:
         that looks entirely normal.
         --allow_partial permits a headline mean over an incomplete set of targets.
         """
+        published = []
         for r in _matrix(dataset, model, preset, set, checkpoint):
             print(f"\n=== {r.dataset.name} × {r.model.name}/{r.model.variant} (predict) ===")
             pipeline.run_predict(r, limit=limit, profile=profile, shard=shard, force=force)
@@ -214,7 +216,8 @@ class Ecstasy:
         pipeline.run_compare(dataset)
 
     def publish(self, dataset, model, preset=None, set=None, checkpoint=None,
-                allow_partial=False, allow_dirty=False, again=False, report=True):
+                allow_partial=False, allow_dirty=False, again=False, report=True,
+                wandb=False):
         """Append a scored run to the committed record (`results/runs.jsonl`).
 
         Deliberate, never automatic: a `--limit 1` smoke and an abandoned experiment
@@ -228,6 +231,12 @@ class Ecstasy:
 
         Summaries only; per-protein detail stays in $DATA_ROOT. Regenerates
         results/LEADERBOARD.md unless --report=False. Commit both together.
+
+        `--wandb` additionally mirrors the new rows to Weights & Biases. It runs
+        strictly AFTER the row is safely appended, and a wandb failure is reported
+        as a warning rather than raised: the committed record is the source of
+        truth and must not be held hostage to a network call. Re-run
+        `ecstasy wandb` later to catch up.
         """
         from ecstasy import report as report_mod
         from ecstasy import results
@@ -243,6 +252,7 @@ class Ecstasy:
                     allow_dirty=allow_dirty, again=again)
             except results.PublishRefused as e:
                 raise SystemExit(str(e)) from None
+            published.append(rec)
             key = results.Key.from_record(rec)
             print(f"published {key.short()}")
             if note:
@@ -258,6 +268,53 @@ class Ecstasy:
                       f"LRMSD={st.get('LRMSD', float('nan')):.2f}A")
         if report:
             print(f"\nleaderboard -> {report_mod.write()}")
+        if wandb:
+            from ecstasy import wandb_export
+            try:
+                sent = wandb_export.export(published)
+                print(f"mirrored {len(sent)} run(s) to wandb")
+            except Exception as e:  # never let this undo a successful publish
+                print(f"WARNING: wandb mirror failed ({e.__class__.__name__}: "
+                      f"{e}).\nThe row IS committed; re-run `ecstasy wandb` "
+                      f"to catch up.")
+
+    def wandb(self, project=None, entity=None, dry_run=False, limit=None):
+        """Mirror `results/runs.jsonl` into Weights & Biases, one run per published row.
+
+        wandb is a *derived view*, exactly like `results/LEADERBOARD.md`: the JSONL stays
+        the source of truth and nothing here writes to it. So this is idempotent — a run's
+        wandb id is a digest of the row's dataset, model, variant and both fingerprints,
+        so re-running updates the same runs instead of duplicating them. Re-scoring after
+        a metric fix changes the scoring fingerprint and therefore appears as a NEW wandb
+        run, which is what preserves the history of a number moving.
+
+        --dry_run prints what would be sent without importing wandb or touching the
+        network, which is also how to check the projection.
+
+        Project resolution is --project, then $WANDB_PROJECT, then "ecstasy-benchmarks";
+        entity is --entity, then $WANDB_ENTITY, then whatever the local login implies.
+        """
+        from ecstasy import results
+        from ecstasy import wandb_export
+
+        rows = results.load()
+        if limit:
+            rows = rows[-int(limit):]
+        if not rows:
+            print("nothing published yet — `ecstasy publish` first")
+            return
+        try:
+            sent = wandb_export.export(rows, project=project, entity=entity,
+                                       dry_run=dry_run)
+        except wandb_export.WandbUnavailable as e:
+            raise SystemExit(str(e)) from None
+        for p in sent:
+            flags = [t for t in p["tags"] if not t.split(":")[0] in
+                     ("dataset", "model", "variant")]
+            print(f"{'would send' if dry_run else 'sent'}  {p['name']}  id={p['id']}"
+                  + (f"  [{', '.join(flags)}]" if flags else ""))
+        if dry_run:
+            print(f"\n{len(sent)} run(s); nothing was sent (--dry_run)")
 
     def report(self, out=None, show=False):
         """Regenerate results/LEADERBOARD.md from the committed results.
