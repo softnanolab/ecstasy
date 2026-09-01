@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from pathlib import Path
 from typing import Any, Iterable
 
 #: Default project. Overridable per invocation; ``WANDB_PROJECT`` wins over this and the
@@ -203,6 +204,33 @@ def payload(row: dict) -> dict[str, Any]:
     }
 
 
+def _log_dir() -> str | None:
+    """Where wandb should keep its local run logs, or None to let wandb decide.
+
+    Defaults to ``$DATA_ROOT/wandb`` rather than the current directory, because wandb's
+    default is ``./wandb`` and the CLI is normally run from the repo root — which quietly
+    fills the *repository* with per-run log directories. That contradicts the rule the
+    results store is built on: the repo keeps numbers you can diff, not blobs. Run logs
+    belong beside the run outputs, next to ``$DATA_ROOT/runs``.
+
+    Returns ``$DATA_ROOT`` itself, not ``$DATA_ROOT/wandb``: wandb creates its own
+    ``wandb/`` beneath whatever ``dir`` it is given, so pointing at the subdirectory
+    yields ``$DATA_ROOT/wandb/wandb/run-…``.
+
+    ``WANDB_DIR`` wins: if the caller has set it, wandb already honours it and this
+    returns None rather than overriding an explicit choice.
+    """
+    if os.environ.get("WANDB_DIR"):
+        return None
+    try:
+        from ecstasy.config import settings
+        root = Path(settings().DATA_ROOT)
+    except Exception:
+        return None  # no .env / no DATA_ROOT: wandb's own default is fine
+    root.mkdir(parents=True, exist_ok=True)
+    return str(root)
+
+
 def export(rows: Iterable[dict], project: str | None = None, entity: str | None = None,
            dry_run: bool = False) -> list[dict]:
     """Create or update one wandb run per row. Returns the payloads that were sent.
@@ -233,10 +261,11 @@ def export(rows: Iterable[dict], project: str | None = None, entity: str | None 
     project = project or os.environ.get("WANDB_PROJECT") or DEFAULT_PROJECT
     entity = entity or os.environ.get("WANDB_ENTITY") or None
 
+    log_dir = _log_dir()
     for p in payloads:
         run = wandb.init(project=project, entity=entity, id=p["id"], name=p["name"],
                          tags=p["tags"], config=p["config"], resume="allow",
-                         reinit=True)
+                         reinit=True, dir=log_dir)
         try:
             run.summary.update(p["summary"])
         finally:

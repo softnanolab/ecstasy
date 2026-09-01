@@ -12,6 +12,7 @@ synthetic rows.
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -170,6 +171,30 @@ def test_export_does_not_mutate_the_rows_it_is_given():
     before = copy.deepcopy(row)
     wandb_export.export([row], dry_run=True)
     assert row == before
+
+
+# --- run logs stay out of the repository -----------------------------------
+
+def test_run_logs_default_to_data_root_not_the_repository():
+    """wandb's default log dir is ./wandb, and the CLI is run from the repo root.
+
+    Left alone that fills the repo with per-run log directories, which contradicts the
+    rule the results store is built on: the repo keeps numbers you can diff, not blobs.
+    """
+    d = wandb_export._log_dir()
+    if d is None:
+        pytest.skip("no DATA_ROOT configured in this environment")
+    from ecstasy.config import settings
+    # DATA_ROOT itself: wandb appends its own `wandb/` beneath `dir`, so passing the
+    # subdirectory would produce $DATA_ROOT/wandb/wandb/run-...
+    assert Path(d) == Path(settings().DATA_ROOT)
+    repo_root = Path(wandb_export.__file__).resolve().parents[2]
+    assert repo_root not in Path(d).resolve().parents, f"{d} is inside the repo"
+
+
+def test_an_explicit_wandb_dir_is_not_overridden(monkeypatch):
+    monkeypatch.setenv("WANDB_DIR", "/tmp/somewhere-explicit")
+    assert wandb_export._log_dir() is None
 
 
 # --- every committed row projects cleanly ----------------------------------

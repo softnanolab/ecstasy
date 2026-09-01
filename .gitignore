@@ -30,3 +30,8 @@ core
 
 # SLURM stdout/stderr — run_experiment.sbatch mkdir -p's this and writes %j files here
 logs/
+
+# wandb run logs. `ecstasy wandb` redirects these to $DATA_ROOT/wandb (see
+# wandb_export._log_dir), but wandb's own default is ./wandb, so anything invoking
+# wandb directly from the repo root would otherwise litter it.
+wandb/
