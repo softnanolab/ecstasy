@@ -105,6 +105,15 @@ export PATH="{p['venv']}/bin:$PATH"
 export COLABFOLD_LOCAL_DIR="{cl_dir}"
 export DATA_DIR="{p['dbs']}"      # local ColabFold DBs (override colabfold-local's default)
 export MMSEQS_BIN="{p['mmseqs']}" # ecstasy's vendored mmseqs-gpu
+# mmseqs writes large prefilter temporaries. TMPDIR defaults to node-local
+# /local/user/$UID, where the prefilter dies with "Could not open .../pref_0.0 for
+# writing"; use the big shared filesystem, as boltz_csv already does.
+export TMPDIR="${{SCRATCHDIR:-/tmp}}/ecstasy_cf_complex_$SLURM_JOB_ID"
+mkdir -p "$TMPDIR"
+# The vendored binary reports "MMseqs2 was compiled without CUDA support", so --gpu 1
+# makes the prefilter die. CPU-only until a CUDA-enabled mmseqs is vendored (the
+# --gpus-per-node request above is then redundant on such clusters).
+export MSA_GPU=0
 
 python "{_DRIVER}" "{_manifest_path()}"
 echo "DONE complex (colabfold-local) MSA generation"
@@ -145,7 +154,8 @@ def ingest(datasets: list[str], out_dir: str | None = None) -> None:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_text(cand.read_text())
                 copied += 1
-    have = sum(1 for v in items.values() if store.path_for_pair(v["seqs"]).exists())
+    have, collapsed, _ = store.depth_report(items)
     if out_dir:
         print(f"[msa:complex] copied {copied} a3ms from {out_dir}")
-    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes")
+    print(f"[msa:complex] store coverage: {have}/{len(items)} complexes "
+          f"({collapsed} collapsed to query-only — proximity dropped all paired hits)")

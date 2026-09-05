@@ -199,7 +199,7 @@ class TestApplySaveMsaFilters:
     def test_coverage_filter_drops_low_rows(self):
         per_chain = self._build_paired_entries(
             depth=2,
-            covs=[0.9, 0.5],   # row 1 below 0.75
+            covs=[0.9, 0.5],   # row 1 below the 0.70 default
             ids=[0.5, 0.5],
             dists=[1, 1],
         )
@@ -213,12 +213,20 @@ class TestApplySaveMsaFilters:
             covs=[0.9, 0.9], ids=[0.5, 0.5],
             dists=[1, 5],  # row 2 has Δgene=5
         )
-        # explicit Δgene=1 (the default is the SI value 20); rows have UniRef so the
+        # Δgene=1 (now the default, matching upstream); rows have UniRef so the
         # genomic test applies and the far row (Δgene=5 > 1) is dropped.
         kept, stats = apply_save_msa_filters(
             per_chain, [4, 4], filters=SaveMsaFilters(max_genomic_distance=1))
         assert stats.kept == 2  # query + first hit
         assert stats.filtered_dist == 1
+
+    def test_defaults_match_latest_upstream(self):
+        # Locked to MSA_Pairformer_with_MMseqs2.ipynb @ main (2026-07-24):
+        # cov=70 -> 0.70, qid=15 -> 0.15, Δgene=1.
+        f = SaveMsaFilters()
+        assert f.min_coverage == 0.70
+        assert f.min_identity == 0.15
+        assert f.max_genomic_distance == 1
 
     def test_non_uniref_rows_kept(self):
         # Notebook save_msa applies the genomic test ONLY to rows with UniRef on every

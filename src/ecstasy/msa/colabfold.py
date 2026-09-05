@@ -312,20 +312,24 @@ def stitch_paired_msa(
 
 @dataclass
 class SaveMsaFilters:
-    """MSA Pairformer paper (SI) pairing/filter defaults. None disables a filter.
+    """MSA-Pairformer proximity pairing/filter defaults. None disables a filter.
 
-    From the SI (Akiyama et al. 2025, bioRxiv 2025.08.02.668173): the accessible
-    MMseqs2 interface-contact route uses proximity-based pairing with **distance
-    ≤ 20** (paircomplete-pairfilterprox_20), **coverage ≥ 75%**, **minimum query
-    identity ≥ 30%**, and **512 sequences** (hhfilter, applied at model load).
-    (The interactive notebook UI used the more aggressive cov=0.75/id=0.15/Δgene=1;
-    those are demo defaults, not the benchmark settings. The paper's HEADLINE
-    interface numbers used pre-computed MSAs from Ovchinnikov et al.; this MMseqs2
-    path is the authors' provided accessible reproduction.)
+    Matches the *current* upstream generator, ``MSA_Pairformer_with_MMseqs2.ipynb``
+    @ yoakiyama/MSA_Pairformer main (restructured 2026-07-24 — ``get_paired_msa``
+    now lives only in that notebook). The notebook's ``save_msa`` defaults are:
+    ``neighbor_stitching=True``, ``Δgene=1``, ``qid=15`` (→ min_identity 0.15),
+    ``cov=70`` (→ min_coverage 0.70). The server call fetches broad
+    (``paircomplete-pairfilterprox_20``, for cache reuse — see ``DEFAULT_MODE``) and
+    the operon-proximity narrowing to ``Δgene≤1`` is applied *client-side* here. The
+    512-sequence hhfilter cap happens later, at model load in
+    ``msa_pairformer_runner.py``.
+
+    Previously this used ``prox_20 / cov 0.75 / id 0.30`` (a deliberate widening);
+    those are superseded by the upstream defaults above.
     """
-    min_coverage: float | None = 0.75
-    min_identity: float | None = 0.30
-    max_genomic_distance: int | None = 20
+    min_coverage: float | None = 0.70
+    min_identity: float | None = 0.15
+    max_genomic_distance: int | None = 1
 
 
 @dataclass
